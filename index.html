@@ -3,22 +3,26 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>2D Drawing Tool - Smooth Pressure Interpolation</title>
+        <title>3D Drawing Practice Tool</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
         <style>
-            #reload {
-                top: 20px;
-                left: 20px;
-                position: absolute;
-                z-index: 1000;
-            }
             body {
                 margin: 0;
                 overflow: hidden;
                 font-family: Arial, sans-serif;
             }
             #container {
+                display: flex;
                 width: 100vw;
                 height: 100vh;
+            }
+            #webgl-container {
+                width: 50%;
+                height: 100%;
+            }
+            #drawing-container {
+                width: 50%;
+                height: 100%;
                 position: relative;
             }
             #drawing-canvas,
@@ -49,36 +53,272 @@
             #drawing-canvas,
             #temp-canvas {
                 cursor: none;
+                background: transparent;
+            }
+            #shape-selector {
+                position: absolute;
+                top: 20px;
+                left: 20px;
+                z-index: 1000;
+            }
+            #color-picker-container {
+                position: absolute;
+                top: 60px;
+                left: 20px;
+                background: rgba(255, 255, 255, 0.8);
+                padding: 10px;
+                border-radius: 5px;
+            }
+            #pen-color-toggle {
+                position: absolute;
+                top: 100px;
+                left: 20px;
+                background: rgba(255, 255, 255, 0.8);
+                padding: 10px;
+                border-radius: 5px;
             }
         </style>
     </head>
     <body>
-        <button id="reload" onclick="window.location.reload()">Reload</button>
         <div id="container">
-            <canvas id="drawing-canvas"></canvas>
-            <canvas id="temp-canvas"></canvas>
-            <svg id="brush-cursor" width="40" height="40">
-                <circle
-                    cx="20"
-                    cy="20"
-                    r="19"
-                    fill="none"
-                    stroke="black"
-                    stroke-width="1"
-                />
-            </svg>
-            <div id="controls">
-                <input
-                    type="range"
-                    id="size-slider"
-                    min="1"
-                    max="100"
-                    value="50"
-                />
-                <span id="size-value">Max: 50px</span><br />
+            <div id="drawing-container">
+                <canvas id="drawing-canvas"></canvas>
+                <canvas id="temp-canvas"></canvas>
+                <svg id="brush-cursor" width="40" height="40">
+                    <circle
+                        cx="20"
+                        cy="20"
+                        r="19"
+                        fill="none"
+                        stroke="black"
+                        stroke-width="1"
+                    />
+                </svg>
+                <div id="controls">
+                    <input
+                        type="range"
+                        id="size-slider"
+                        min="1"
+                        max="100"
+                        value="50"
+                    />
+                    <span id="size-value">Max: 50px</span><br />
+                </div>
             </div>
+            <div id="webgl-container"></div>
         </div>
+        <select id="shape-selector">
+            <option value="sphere">Sphere</option>
+            <option value="cube">Cube</option>
+            <option value="cylinder">Cylinder</option>
+            <option value="cone">Cone</option>
+        </select>
+        <div id="color-picker-container">
+            <label for="background-color">Background Color:</label>
+            <input type="color" id="background-color" value="#888888" />
+        </div>
+        <div id="pen-color-toggle">
+            <label for="pen-color">Pen Color:</label>
+            <select id="pen-color">
+                <option value="black">Black</option>
+                <option value="white">White</option>
+            </select>
+        </div>
+
         <script>
+            class WebGLViewer {
+                constructor() {
+                    this.container = document.getElementById("webgl-container");
+                    this.scene = new THREE.Scene();
+                    this.camera = new THREE.PerspectiveCamera(
+                        75,
+                        this.container.clientWidth /
+                            this.container.clientHeight,
+                        0.1,
+                        1000,
+                    );
+                    this.renderer = new THREE.WebGLRenderer();
+                    this.renderer.setSize(
+                        this.container.clientWidth,
+                        this.container.clientHeight,
+                    );
+
+                    document
+                        .getElementById("shape-selector")
+                        .addEventListener("change", (e) =>
+                            this.onShapeChange(e),
+                        );
+
+                    this.isMouseDown = false;
+                    this.mouseX = 0;
+                    this.mouseY = 0;
+                    this.targetRotationX = 0;
+                    this.targetRotationY = 0;
+                    this.isPanning = false;
+                    this.panStart = new THREE.Vector2();
+                    this.panEnd = new THREE.Vector2();
+                    this.panDelta = new THREE.Vector2();
+
+                    this.rotationGroup = new THREE.Group();
+                    this.scene.add(this.rotationGroup);
+
+                    this.renderer.domElement.addEventListener(
+                        "pointerdown",
+                        (e) => this.onPointerDown(e),
+                    );
+                    this.renderer.domElement.addEventListener(
+                        "pointermove",
+                        (e) => this.onPointerMove(e),
+                    );
+                    this.renderer.domElement.addEventListener("pointerup", () =>
+                        this.onPointerUp(),
+                    );
+                    this.renderer.domElement.addEventListener(
+                        "pointerleave",
+                        () => this.onPointerUp(),
+                    );
+
+                    this.container.appendChild(this.renderer.domElement);
+
+                    this.camera.position.z = 5;
+
+                    this.setupLighting();
+                    this.createGeometries();
+                    this.currentShape = "sphere";
+                    this.updateShape();
+
+                    window.addEventListener("resize", () =>
+                        this.onWindowResize(),
+                    );
+
+                    this.animate();
+                }
+
+                setupLighting() {
+                    const ambientLight = new THREE.AmbientLight(0x404040);
+                    this.scene.add(ambientLight);
+
+                    const directionalLight = new THREE.DirectionalLight(
+                        0xffffff,
+                        0.5,
+                    );
+                    directionalLight.position.set(1, 1, 1);
+                    this.scene.add(directionalLight);
+                }
+
+                createGeometries() {
+                    const material = new THREE.MeshPhongMaterial({
+                        color: 0x00ff00,
+                    });
+
+                    this.geometries = {
+                        sphere: new THREE.Mesh(
+                            new THREE.SphereGeometry(1, 32, 32),
+                            material,
+                        ),
+                        cube: new THREE.Mesh(
+                            new THREE.BoxGeometry(1, 1, 1),
+                            material,
+                        ),
+                        cylinder: new THREE.Mesh(
+                            new THREE.CylinderGeometry(0.5, 0.5, 1, 32),
+                            material,
+                        ),
+                        cone: new THREE.Mesh(
+                            new THREE.ConeGeometry(0.5, 1, 32),
+                            material,
+                        ),
+                    };
+
+                    // Adjust initial rotation for cylinder and cone
+                    this.geometries.cylinder.rotation.x = Math.PI / 2;
+                    this.geometries.cone.rotation.x = Math.PI / 2;
+                }
+
+                updateShape() {
+                    this.rotationGroup.clear();
+                    this.rotationGroup.add(this.geometries[this.currentShape]);
+                    this.animate();
+                }
+
+                onShapeChange(event) {
+                    this.currentShape = event.target.value;
+                    this.updateShape();
+                }
+
+                onWindowResize() {
+                    this.camera.aspect =
+                        this.container.clientWidth /
+                        this.container.clientHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(
+                        this.container.clientWidth,
+                        this.container.clientHeight,
+                    );
+                }
+
+                onPointerDown(event) {
+                    this.isMouseDown = true;
+                    this.mouseX = event.clientX;
+                    this.mouseY = event.clientY;
+                    this.animate();
+                }
+
+                onPointerMove(event) {
+                    if (!this.isMouseDown) return;
+
+                    const deltaX = event.clientX - this.mouseX;
+                    const deltaY = event.clientY - this.mouseY;
+
+                    this.targetRotationY += deltaX * 0.01;
+                    this.targetRotationX += deltaY * 0.01;
+
+                    this.mouseX = event.clientX;
+                    this.mouseY = event.clientY;
+                }
+
+                onPointerUp() {
+                    this.isMouseDown = false;
+                }
+
+                pan(deltaX, deltaY) {
+                    const speed = 0.01;
+                    const distance = this.camera.position.z;
+                    const panLeft = new THREE.Vector3();
+                    const panUp = new THREE.Vector3();
+                    const vec = new THREE.Vector3();
+
+                    vec.setFromMatrixColumn(this.camera.matrix, 0);
+                    panLeft.crossVectors(this.camera.up, vec);
+                    panLeft.multiplyScalar(-deltaX * speed * distance);
+
+                    vec.setFromMatrixColumn(this.camera.matrix, 1);
+                    panUp.copy(vec);
+                    panUp.multiplyScalar(deltaY * speed * distance);
+
+                    this.camera.position.add(panLeft);
+                    this.camera.position.add(panUp);
+                    this.rotationGroup.position.add(panLeft);
+                    this.rotationGroup.position.add(panUp);
+                }
+
+                animate() {
+                    if (this.isMouseDown || this.isPanning) {
+                        requestAnimationFrame(() => this.animate());
+                    }
+
+                    // Smoothly interpolate current rotation to target rotation
+                    this.rotationGroup.rotation.y +=
+                        (this.targetRotationY - this.rotationGroup.rotation.y) *
+                        0.1;
+                    this.rotationGroup.rotation.x +=
+                        (this.targetRotationX - this.rotationGroup.rotation.x) *
+                        0.1;
+
+                    this.renderer.render(this.scene, this.camera);
+                }
+            }
+
             class DrawingTool {
                 constructor() {
                     this.canvas = document.getElementById("drawing-canvas");
@@ -89,6 +329,12 @@
                     this.sizeSlider = document.getElementById("size-slider");
                     this.sizeValue = document.getElementById("size-value");
 
+                    this.backgroundColorPicker =
+                        document.getElementById("background-color");
+                    this.penColorSelector =
+                        document.getElementById("pen-color");
+                    this.penColor = "black";
+
                     this.isDrawing = false;
                     this.points = [];
                     this.lastPoint = null;
@@ -98,6 +344,7 @@
                     this.initializeEventListeners();
                     this.resizeCanvas();
                     this.updateMaxBrushSize();
+                    this.updateBackgroundColor();
                     this.saveState();
                 }
 
@@ -126,6 +373,14 @@
                     this.tempCanvas.addEventListener("pointerleave", () =>
                         this.hideBrushCursor(),
                     );
+
+                    this.backgroundColorPicker.addEventListener("input", () =>
+                        this.updateBackgroundColor(),
+                    );
+                    this.penColorSelector.addEventListener("change", () =>
+                        this.updatePenColor(),
+                    );
+
                     document.addEventListener("keydown", (e) => {
                         if (e.ctrlKey && e.key === "z") {
                             e.preventDefault();
@@ -135,6 +390,8 @@
                 }
 
                 resizeCanvas() {
+                    const container =
+                        document.getElementById("drawing-container");
                     const tempImageData = this.ctx.getImageData(
                         0,
                         0,
@@ -142,9 +399,9 @@
                         this.canvas.height,
                     );
                     this.canvas.width = this.tempCanvas.width =
-                        window.innerWidth;
+                        container.clientWidth;
                     this.canvas.height = this.tempCanvas.height =
-                        window.innerHeight;
+                        container.clientHeight;
                     this.ctx.putImageData(tempImageData, 0, 0);
                     [this.ctx, this.tempCtx].forEach((ctx) => {
                         ctx.lineCap = ctx.lineJoin = "round";
@@ -156,9 +413,18 @@
                     this.sizeValue.textContent = `Max: ${this.maxBrushSize}px`;
                 }
 
+                updateBackgroundColor() {
+                    const color = this.backgroundColorPicker.value;
+                    this.canvas.style.backgroundColor = color;
+                }
+
+                updatePenColor() {
+                    this.penColor = this.penColorSelector.value;
+                }
+
                 updateBrushCursor(e) {
                     const pressure =
-                        e.pressure !== undefined ? e.pressure : 0.5; // Default to 0.5 if pressure is not available
+                        e.pressure !== undefined ? e.pressure : 0.5;
                     const size = this.calculateCursorSize(pressure);
                     this.brushCursor.style.left = `${e.clientX - size}px`;
                     this.brushCursor.style.top = `${e.clientY - size}px`;
@@ -183,11 +449,11 @@
                 }
 
                 calculateBrushSize(pressure) {
-                    return Math.max(1, this.maxBrushSize * pressure); // Ensure minimum size of 1
+                    return Math.max(1, this.maxBrushSize * pressure);
                 }
 
                 calculateOpacity(pressure) {
-                    return Math.max(0.1, pressure); // Ensure minimum opacity of 0.1
+                    return Math.max(0.1, pressure);
                 }
 
                 hideBrushCursor() {
@@ -210,7 +476,11 @@
 
                 addPoint(e) {
                     const pressure = e.pressure || 0;
-                    if (pressure === 0) return; // Don't add point if there's no pressure
+                    if (pressure === 0 || pressure === 0.5) return;
+
+                    if (pressure >= 0.5) {
+                        console.log("pressure: ", pressure);
+                    }
 
                     const newPoint = {
                         x: e.offsetX,
@@ -234,7 +504,6 @@
 
                     this.tempCtx.beginPath();
 
-                    // Helper function for Catmull-Rom interpolation
                     const catmullRom = (p0, p1, p2, p3, t) => {
                         const t2 = t * t;
                         const t3 = t2 * t;
@@ -269,8 +538,6 @@
                                         t3),
                         };
                     };
-
-                    // We need at least 4 points for Catmull-Rom spline
                     if (this.points.length >= 4) {
                         for (let i = 0; i < this.points.length - 3; i++) {
                             const p0 = this.points[i];
@@ -278,7 +545,6 @@
                             const p2 = this.points[i + 2];
                             const p3 = this.points[i + 3];
 
-                            // Interpolate between p1 and p2
                             for (let t = 0; t <= 1; t += 0.1) {
                                 const pt = catmullRom(p0, p1, p2, p3, t);
                                 const size = this.calculateBrushSize(
@@ -289,7 +555,12 @@
                                 );
 
                                 this.tempCtx.lineWidth = size;
-                                this.tempCtx.strokeStyle = `rgba(0, 0, 0, ${opacity})`;
+                                let color =
+                                    this.penColor === "white"
+                                        ? `rgba(255, 255, 255, ${this.calculateOpacity(opacity)})`
+                                        : `rgba(0, 0, 0, ${this.calculateOpacity(opacity)})`;
+
+                                this.tempCtx.strokeStyle = color;
                                 this.tempCtx.lineTo(pt.x, pt.y);
                                 this.tempCtx.stroke();
                                 this.tempCtx.beginPath();
@@ -297,12 +568,16 @@
                             }
                         }
                     } else {
-                        // Fallback to simple line for fewer points
                         this.points.forEach((point) => {
                             this.tempCtx.lineWidth = this.calculateBrushSize(
                                 point.pressure,
                             );
-                            this.tempCtx.strokeStyle = `rgba(0, 0, 0, ${this.calculateOpacity(point.pressure)})`;
+                            let color =
+                                this.penColor === "white"
+                                    ? `rgba(255, 255, 255, ${this.calculateOpacity(point.pressure)})`
+                                    : `rgba(0, 0, 0, ${this.calculateOpacity(point.pressure)})`;
+
+                            this.tempCtx.strokeStyle = color;
                             this.tempCtx.lineTo(point.x, point.y);
                             this.tempCtx.stroke();
                             this.tempCtx.beginPath();
@@ -331,7 +606,7 @@
 
                 undo() {
                     if (this.undoStack.length > 1) {
-                        this.undoStack.pop(); // Remove the current state
+                        this.undoStack.pop();
                         const img = new Image();
                         img.onload = () => {
                             this.ctx.clearRect(
@@ -344,7 +619,6 @@
                         };
                         img.src = this.undoStack[this.undoStack.length - 1];
                     } else if (this.undoStack.length === 1) {
-                        // If there's only one state (the initial blank state), clear the canvas
                         this.ctx.clearRect(
                             0,
                             0,
@@ -355,6 +629,7 @@
                 }
             }
 
+            new WebGLViewer();
             new DrawingTool();
         </script>
     </body>
