@@ -77,6 +77,16 @@
                 padding: 10px;
                 border-radius: 5px;
             }
+
+            #reload-button {
+                position: absolute;
+                top: 20px;
+                left: 160px;
+                background: rgba(255, 255, 255, 0.8);
+                padding: 5px;
+                border: none;
+                border-radius: 5px;
+            }
         </style>
     </head>
     <body>
@@ -113,6 +123,9 @@
             <option value="cylinder">Cylinder</option>
             <option value="cone">Cone</option>
         </select>
+        <button id="reload-button" onClick="window.location.reload();">
+            Reload
+        </button>
         <div id="color-picker-container">
             <label for="background-color">Background Color:</label>
             <input type="color" id="background-color" value="#888888" />
@@ -184,7 +197,7 @@
 
                     this.setupLighting();
                     this.createGeometries();
-                    this.currentShape = "sphere";
+                    this.onShapeChange();
                     this.updateShape();
 
                     window.addEventListener("resize", () =>
@@ -241,8 +254,9 @@
                     this.animate();
                 }
 
-                onShapeChange(event) {
-                    this.currentShape = event.target.value;
+                onShapeChange() {
+                    this.currentShape =
+                        document.getElementById("shape-selector").value;
                     this.updateShape();
                 }
 
@@ -333,7 +347,7 @@
                         document.getElementById("background-color");
                     this.penColorSelector =
                         document.getElementById("pen-color");
-                    this.penColor = "black";
+                    this.penColor = this.penColorSelector.value;
 
                     this.isDrawing = false;
                     this.points = [];
@@ -477,10 +491,6 @@
                 addPoint(e) {
                     const pressure = e.pressure || 0;
                     if (pressure === 0 || pressure === 0.5) return;
-
-                    if (pressure >= 0.5) {
-                        console.log("pressure: ", pressure);
-                    }
 
                     const newPoint = {
                         x: e.offsetX,
