@@ -5,6 +5,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>3D Drawing Practice Tool</title>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
         <style>
             body {
                 margin: 0;
@@ -122,6 +123,7 @@
             <option value="cube">Cube</option>
             <option value="cylinder">Cylinder</option>
             <option value="cone">Cone</option>
+            <option value="upload">Upload OBJ</option>
         </select>
         <button id="reload-button" onClick="window.location.reload();">
             Reload
@@ -156,11 +158,30 @@
                         this.container.clientHeight,
                     );
 
-                    document
-                        .getElementById("shape-selector")
-                        .addEventListener("change", (e) =>
-                            this.onShapeChange(e),
-                        );
+                    this.shapeSelector =
+                        document.getElementById("shape-selector");
+                    this.shapeSelector.addEventListener("change", (e) =>
+                        this.onShapeChange(e),
+                    );
+
+                    // Add file input for OBJ upload
+                    this.fileInput = document.createElement("input");
+                    this.fileInput.type = "file";
+                    this.fileInput.accept = ".obj";
+                    this.fileInput.style.display = "none";
+                    this.fileInput.addEventListener("change", (e) =>
+                        this.onFileUpload(e),
+                    );
+                    this.container.appendChild(this.fileInput);
+
+                    // Add delete button
+                    this.deleteButton = document.createElement("button");
+                    this.deleteButton.textContent = "Delete Object";
+                    this.deleteButton.style.display = "none";
+                    this.deleteButton.addEventListener("click", () =>
+                        this.deleteCurrentObject(),
+                    );
+                    this.container.appendChild(this.deleteButton);
 
                     this.isMouseDown = false;
                     this.mouseX = 0;
@@ -197,6 +218,7 @@
 
                     this.setupLighting();
                     this.createGeometries();
+                    this.loadStoredObjects();
                     this.onShapeChange();
                     this.updateShape();
 
@@ -241,6 +263,7 @@
                             new THREE.ConeGeometry(0.5, 1, 32),
                             material,
                         ),
+                        upload: null, // Placeholder for uploaded objects
                     };
 
                     // Adjust initial rotation for cylinder and cone
@@ -248,18 +271,170 @@
                     this.geometries.cone.rotation.x = Math.PI / 2;
                 }
 
-                updateShape() {
-                    this.rotationGroup.clear();
-                    this.rotationGroup.add(this.geometries[this.currentShape]);
-                    this.animate();
+                createGeometries() {
+                    const material = new THREE.MeshPhongMaterial({
+                        color: 0x00ff00,
+                    });
+
+                    this.geometries = {
+                        sphere: new THREE.Mesh(
+                            new THREE.SphereGeometry(1, 32, 32),
+                            material,
+                        ),
+                        cube: new THREE.Mesh(
+                            new THREE.BoxGeometry(1, 1, 1),
+                            material,
+                        ),
+                        cylinder: new THREE.Mesh(
+                            new THREE.CylinderGeometry(0.5, 0.5, 1, 32),
+                            material,
+                        ),
+                        cone: new THREE.Mesh(
+                            new THREE.ConeGeometry(0.5, 1, 32),
+                            material,
+                        ),
+                        upload: null, // Placeholder for uploaded objects
+                    };
+
+                    // Adjust initial rotation for cylinder and cone
+                    this.geometries.cylinder.rotation.x = Math.PI / 2;
+                    this.geometries.cone.rotation.x = Math.PI / 2;
+                }
+
+                loadStoredObjects() {
+                    const storedObjects =
+                        JSON.parse(localStorage.getItem("storedObjects")) || {};
+
+                    for (const [name, objData] of Object.entries(
+                        storedObjects,
+                    )) {
+                        this.addObjectToGeometries(name, objData);
+                        this.addOptionToSelector(name);
+                    }
+                }
+
+                addObjectToGeometries(name, objData) {
+                    const loader = new THREE.OBJLoader();
+                    const object = loader.parse(objData);
+                    const material = new THREE.MeshPhongMaterial({
+                        color: 0x00ff00,
+                    });
+                    object.traverse((child) => {
+                        if (child instanceof THREE.Mesh) {
+                            child.material = material;
+                        }
+                    });
+                    this.geometries[name] = object;
+                }
+
+                addOptionToSelector(name) {
+                    const option = document.createElement("option");
+                    option.value = name;
+                    option.textContent = name;
+                    this.shapeSelector.appendChild(option);
                 }
 
                 onShapeChange() {
-                    this.currentShape =
-                        document.getElementById("shape-selector").value;
-                    this.updateShape();
+                    this.currentShape = this.shapeSelector.value;
+                    if (this.currentShape === "upload") {
+                        this.fileInput.click();
+                    } else {
+                        this.updateShape();
+                    }
+                    this.updateDeleteButtonVisibility();
                 }
 
+                updateDeleteButtonVisibility() {
+                    const isCustomObject = ![
+                        "sphere",
+                        "cube",
+                        "cylinder",
+                        "cone",
+                        "upload",
+                    ].includes(this.currentShape);
+                    this.deleteButton.style.display = isCustomObject
+                        ? "inline-block"
+                        : "none";
+                }
+
+                onFileUpload(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const objData = e.target.result;
+                        this.promptForObjectName(objData);
+                    };
+                    reader.readAsText(file);
+                }
+
+                promptForObjectName(objData) {
+                    const name = prompt(
+                        "Enter a name for the uploaded object:",
+                        "",
+                    );
+                    if (name) {
+                        this.addObjectToGeometries(name, objData);
+                        this.addOptionToSelector(name);
+
+                        // Store in local storage
+                        const storedObjects =
+                            JSON.parse(localStorage.getItem("storedObjects")) ||
+                            {};
+                        storedObjects[name] = objData;
+                        localStorage.setItem(
+                            "storedObjects",
+                            JSON.stringify(storedObjects),
+                        );
+
+                        this.shapeSelector.value = name;
+                        this.currentShape = name;
+                        this.updateShape();
+                        this.updateDeleteButtonVisibility();
+                    }
+                }
+
+                deleteCurrentObject() {
+                    if (
+                        confirm(
+                            `Are you sure you want to delete "${this.currentShape}"?`,
+                        )
+                    ) {
+                        // Remove from geometries
+                        delete this.geometries[this.currentShape];
+
+                        // Remove from selector
+                        const option = this.shapeSelector.querySelector(
+                            `option[value="${this.currentShape}"]`,
+                        );
+                        if (option) option.remove();
+
+                        // Remove from local storage
+                        const storedObjects =
+                            JSON.parse(localStorage.getItem("storedObjects")) ||
+                            {};
+                        delete storedObjects[this.currentShape];
+                        localStorage.setItem(
+                            "storedObjects",
+                            JSON.stringify(storedObjects),
+                        );
+
+                        // Reset to default shape
+                        this.shapeSelector.value = "sphere";
+                        this.onShapeChange();
+                    }
+                }
+
+                updateShape() {
+                    this.rotationGroup.clear();
+                    if (this.geometries[this.currentShape]) {
+                        this.rotationGroup.add(
+                            this.geometries[this.currentShape],
+                        );
+                    }
+                    this.animate();
+                }
                 onWindowResize() {
                     this.camera.aspect =
                         this.container.clientWidth /
