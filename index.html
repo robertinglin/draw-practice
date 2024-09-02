@@ -78,6 +78,14 @@
                 padding: 10px;
                 border-radius: 5px;
             }
+            #eraser-toggle {
+                position: absolute;
+                top: 140px;
+                left: 20px;
+                background: rgba(255, 255, 255, 0.8);
+                padding: 10px;
+                border-radius: 5px;
+            }
 
             #reload-button {
                 position: absolute;
@@ -140,6 +148,11 @@
             </select>
         </div>
 
+        <div id="eraser-toggle">
+            <label for="eraser-checkbox">Eraser:</label>
+            <input type="checkbox" id="eraser-checkbox" />
+        </div>
+
         <script>
             class WebGLViewer {
                 constructor() {
@@ -188,10 +201,14 @@
                     this.mouseY = 0;
                     this.targetRotationX = 0;
                     this.targetRotationY = 0;
+                    this.zoomSpeed = 0.5;
+                    this.minZoom = 1;
+                    this.maxZoom = 10;
                     this.isPanning = false;
                     this.panStart = new THREE.Vector2();
                     this.panEnd = new THREE.Vector2();
                     this.panDelta = new THREE.Vector2();
+                    this.db = null;
 
                     this.rotationGroup = new THREE.Group();
                     this.scene.add(this.rotationGroup);
@@ -211,6 +228,13 @@
                         "pointerleave",
                         () => this.onPointerUp(),
                     );
+                    this.renderer.domElement.addEventListener("wheel", (e) =>
+                        this.onWheel(e),
+                    );
+                    this.renderer.domElement.addEventListener(
+                        "contextmenu",
+                        (e) => e.preventDefault(),
+                    );
 
                     this.container.appendChild(this.renderer.domElement);
 
@@ -218,7 +242,9 @@
 
                     this.setupLighting();
                     this.createGeometries();
-                    this.loadStoredObjects();
+                    this.initIndexedDB().then(() => {
+                        this.loadStoredObjects();
+                    });
                     this.onShapeChange();
                     this.updateShape();
 
@@ -226,19 +252,26 @@
                         this.onWindowResize(),
                     );
 
-                    this.animate();
+                    this.render();
                 }
 
                 setupLighting() {
-                    const ambientLight = new THREE.AmbientLight(0x404040);
-                    this.scene.add(ambientLight);
+                    this.ambientLight = new THREE.AmbientLight(0x404040);
+                    this.scene.add(this.ambientLight);
 
-                    const directionalLight = new THREE.DirectionalLight(
+                    this.directionalLight = new THREE.DirectionalLight(
                         0xffffff,
                         0.5,
                     );
-                    directionalLight.position.set(1, 1, 1);
-                    this.scene.add(directionalLight);
+                    this.directionalLight.position.set(1, 1, 1);
+                    this.scene.add(this.directionalLight);
+
+                    // Add a helper to visualize the light direction
+                    this.lightHelper = new THREE.DirectionalLightHelper(
+                        this.directionalLight,
+                        0.5,
+                    );
+                    this.scene.add(this.lightHelper);
                 }
 
                 createGeometries() {
@@ -301,16 +334,100 @@
                     this.geometries.cone.rotation.x = Math.PI / 2;
                 }
 
-                loadStoredObjects() {
-                    const storedObjects =
-                        JSON.parse(localStorage.getItem("storedObjects")) || {};
+                async initIndexedDB() {
+                    return new Promise((resolve, reject) => {
+                        const request = indexedDB.open("WebGLViewerDB", 1);
 
-                    for (const [name, objData] of Object.entries(
-                        storedObjects,
-                    )) {
-                        this.addObjectToGeometries(name, objData);
-                        this.addOptionToSelector(name);
-                    }
+                        request.onerror = (event) => {
+                            console.error(
+                                "IndexedDB error:",
+                                event.target.error,
+                            );
+                            reject(event.target.error);
+                        };
+
+                        request.onsuccess = (event) => {
+                            this.db = event.target.result;
+                            resolve();
+                        };
+
+                        request.onupgradeneeded = (event) => {
+                            const db = event.target.result;
+                            const objectStore = db.createObjectStore(
+                                "objects",
+                                { keyPath: "name" },
+                            );
+                            objectStore.createIndex("name", "name", {
+                                unique: true,
+                            });
+                        };
+                    });
+                }
+
+                async loadStoredObjects() {
+                    const transaction = this.db.transaction(
+                        ["objects"],
+                        "readonly",
+                    );
+                    const objectStore = transaction.objectStore("objects");
+                    const request = objectStore.getAll();
+
+                    request.onsuccess = (event) => {
+                        const objects = event.target.result;
+                        objects.forEach((obj) => {
+                            this.addObjectToGeometries(obj.name, obj.data);
+                            this.addOptionToSelector(obj.name);
+                        });
+                    };
+                }
+
+                async saveObject(name, objData) {
+                    return new Promise((resolve, reject) => {
+                        const transaction = this.db.transaction(
+                            ["objects"],
+                            "readwrite",
+                        );
+                        const objectStore = transaction.objectStore("objects");
+                        const request = objectStore.put({
+                            name: name,
+                            data: objData,
+                        });
+
+                        request.onerror = (event) => {
+                            console.error(
+                                "Error saving object:",
+                                event.target.error,
+                            );
+                            reject(event.target.error);
+                        };
+
+                        request.onsuccess = (event) => {
+                            resolve();
+                        };
+                    });
+                }
+
+                async deleteObject(name) {
+                    return new Promise((resolve, reject) => {
+                        const transaction = this.db.transaction(
+                            ["objects"],
+                            "readwrite",
+                        );
+                        const objectStore = transaction.objectStore("objects");
+                        const request = objectStore.delete(name);
+
+                        request.onerror = (event) => {
+                            console.error(
+                                "Error deleting object:",
+                                event.target.error,
+                            );
+                            reject(event.target.error);
+                        };
+
+                        request.onsuccess = (event) => {
+                            resolve();
+                        };
+                    });
                 }
 
                 addObjectToGeometries(name, objData) {
@@ -344,6 +461,24 @@
                     this.updateDeleteButtonVisibility();
                 }
 
+                onWheel(event) {
+                    event.preventDefault();
+
+                    const delta = -event.deltaY;
+                    const zoomFactor = 1 - (delta * this.zoomSpeed) / 1000;
+
+                    // Calculate new zoom level
+                    const newZoom = this.camera.position.z * zoomFactor;
+
+                    // Clamp zoom level
+                    this.camera.position.z = Math.max(
+                        this.minZoom,
+                        Math.min(this.maxZoom, newZoom),
+                    );
+
+                    this.render();
+                }
+
                 updateDeleteButtonVisibility() {
                     const isCustomObject = ![
                         "sphere",
@@ -369,7 +504,7 @@
                     reader.readAsText(file);
                 }
 
-                promptForObjectName(objData) {
+                async promptForObjectName(objData) {
                     const name = prompt(
                         "Enter a name for the uploaded object:",
                         "",
@@ -378,54 +513,46 @@
                         this.addObjectToGeometries(name, objData);
                         this.addOptionToSelector(name);
 
-                        // Store in local storage
-                        const storedObjects =
-                            JSON.parse(localStorage.getItem("storedObjects")) ||
-                            {};
-                        storedObjects[name] = objData;
-                        localStorage.setItem(
-                            "storedObjects",
-                            JSON.stringify(storedObjects),
-                        );
-
-                        this.shapeSelector.value = name;
-                        this.currentShape = name;
-                        this.updateShape();
-                        this.updateDeleteButtonVisibility();
+                        try {
+                            await this.saveObject(name, objData);
+                            this.shapeSelector.value = name;
+                            this.currentShape = name;
+                            this.updateShape();
+                            this.updateDeleteButtonVisibility();
+                        } catch (error) {
+                            console.error("Failed to save object:", error);
+                            alert("Failed to save object. Please try again.");
+                        }
                     }
                 }
 
-                deleteCurrentObject() {
+                async deleteCurrentObject() {
                     if (
                         confirm(
                             `Are you sure you want to delete "${this.currentShape}"?`,
                         )
                     ) {
-                        // Remove from geometries
-                        delete this.geometries[this.currentShape];
+                        try {
+                            await this.deleteObject(this.currentShape);
 
-                        // Remove from selector
-                        const option = this.shapeSelector.querySelector(
-                            `option[value="${this.currentShape}"]`,
-                        );
-                        if (option) option.remove();
+                            // Remove from geometries
+                            delete this.geometries[this.currentShape];
 
-                        // Remove from local storage
-                        const storedObjects =
-                            JSON.parse(localStorage.getItem("storedObjects")) ||
-                            {};
-                        delete storedObjects[this.currentShape];
-                        localStorage.setItem(
-                            "storedObjects",
-                            JSON.stringify(storedObjects),
-                        );
+                            // Remove from selector
+                            const option = this.shapeSelector.querySelector(
+                                `option[value="${this.currentShape}"]`,
+                            );
+                            if (option) option.remove();
 
-                        // Reset to default shape
-                        this.shapeSelector.value = "sphere";
-                        this.onShapeChange();
+                            // Reset to default shape
+                            this.shapeSelector.value = "sphere";
+                            this.onShapeChange();
+                        } catch (error) {
+                            console.error("Failed to delete object:", error);
+                            alert("Failed to delete object. Please try again.");
+                        }
                     }
                 }
-
                 updateShape() {
                     this.rotationGroup.clear();
                     if (this.geometries[this.currentShape]) {
@@ -433,7 +560,7 @@
                             this.geometries[this.currentShape],
                         );
                     }
-                    this.animate();
+                    this.render();
                 }
                 onWindowResize() {
                     this.camera.aspect =
@@ -450,7 +577,8 @@
                     this.isMouseDown = true;
                     this.mouseX = event.clientX;
                     this.mouseY = event.clientY;
-                    this.animate();
+                    this.isRightMouseDown = event.button === 2; // Check if right mouse button is pressed
+                    this.render();
                 }
 
                 onPointerMove(event) {
@@ -459,8 +587,41 @@
                     const deltaX = event.clientX - this.mouseX;
                     const deltaY = event.clientY - this.mouseY;
 
-                    this.targetRotationY += deltaX * 0.01;
-                    this.targetRotationX += deltaY * 0.01;
+                    if (this.isRightMouseDown) {
+                        // Rotate light around the center point
+                        const rotationSpeed = 0.01;
+                        const lightRadius =
+                            this.directionalLight.position.length();
+
+                        // Rotate around Y-axis
+                        this.directionalLight.position.applyAxisAngle(
+                            new THREE.Vector3(0, 1, 0),
+                            -deltaX * rotationSpeed,
+                        );
+
+                        // Rotate around X-axis
+                        const right = new THREE.Vector3(
+                            1,
+                            0,
+                            0,
+                        ).applyQuaternion(this.camera.quaternion);
+                        this.directionalLight.position.applyAxisAngle(
+                            right,
+                            -deltaY * rotationSpeed,
+                        );
+
+                        // Ensure the light maintains its distance from the center
+                        this.directionalLight.position
+                            .normalize()
+                            .multiplyScalar(lightRadius);
+
+                        // Update the light helper
+                        this.lightHelper.update();
+                    } else {
+                        // Rotate geometry (left mouse button)
+                        this.targetRotationY += deltaX * 0.01;
+                        this.targetRotationX += deltaY * 0.01;
+                    }
 
                     this.mouseX = event.clientX;
                     this.mouseY = event.clientY;
@@ -468,6 +629,9 @@
 
                 onPointerUp() {
                     this.isMouseDown = false;
+                    this.isRightMouseDown = false;
+                    this.targetRotationY = this.rotationGroup.rotation.y;
+                    this.targetRotationX = this.rotationGroup.rotation.x;
                 }
 
                 pan(deltaX, deltaY) {
@@ -491,9 +655,9 @@
                     this.rotationGroup.position.add(panUp);
                 }
 
-                animate() {
+                render() {
                     if (this.isMouseDown || this.isPanning) {
-                        requestAnimationFrame(() => this.animate());
+                        requestAnimationFrame(() => this.render());
                     }
 
                     // Smoothly interpolate current rotation to target rotation
@@ -508,27 +672,73 @@
                 }
             }
 
+            const catmullRom = (p0, p1, p2, p3, t) => {
+                const t2 = t * t;
+                const t3 = t2 * t;
+                return {
+                    x:
+                        0.5 *
+                        (2 * p1.x +
+                            (-p0.x + p2.x) * t +
+                            (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+                            (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+                    y:
+                        0.5 *
+                        (2 * p1.y +
+                            (-p0.y + p2.y) * t +
+                            (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+                            (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+                    pressure:
+                        0.5 *
+                        (2 * p1.pressure +
+                            (-p0.pressure + p2.pressure) * t +
+                            (2 * p0.pressure -
+                                5 * p1.pressure +
+                                4 * p2.pressure -
+                                p3.pressure) *
+                                t2 +
+                            (-p0.pressure +
+                                3 * p1.pressure -
+                                3 * p2.pressure +
+                                p3.pressure) *
+                                t3),
+                };
+            };
+
             class DrawingTool {
                 constructor() {
-                    this.canvas = document.getElementById("drawing-canvas");
-                    this.ctx = this.canvas.getContext("2d");
+                    this.visibleCanvas =
+                        document.getElementById("drawing-canvas");
+                    this.visibleCtx = this.visibleCanvas.getContext("2d");
                     this.tempCanvas = document.getElementById("temp-canvas");
                     this.tempCtx = this.tempCanvas.getContext("2d");
+
+                    // Create a new canvas to store the entire drawing
+                    this.parentCanvas = document.createElement("canvas");
+                    this.parentCtx = this.parentCanvas.getContext("2d");
+
                     this.brushCursor = document.getElementById("brush-cursor");
                     this.sizeSlider = document.getElementById("size-slider");
                     this.sizeValue = document.getElementById("size-value");
-
                     this.backgroundColorPicker =
                         document.getElementById("background-color");
                     this.penColorSelector =
                         document.getElementById("pen-color");
-                    this.penColor = this.penColorSelector.value;
+                    this.eraserCheckbox =
+                        document.getElementById("eraser-checkbox");
 
+                    this.penColor = this.penColorSelector.value;
                     this.isDrawing = false;
                     this.points = [];
                     this.lastPoint = null;
                     this.maxBrushSize = 50;
                     this.undoStack = [];
+                    this.minimumPressure = 0.1;
+
+                    this.scale = 1;
+                    this.offsetX = 0;
+                    this.offsetY = 0;
+                    this.isErasing = false;
 
                     this.initializeEventListeners();
                     this.resizeCanvas();
@@ -562,14 +772,18 @@
                     this.tempCanvas.addEventListener("pointerleave", () =>
                         this.hideBrushCursor(),
                     );
-
                     this.backgroundColorPicker.addEventListener("input", () =>
                         this.updateBackgroundColor(),
                     );
                     this.penColorSelector.addEventListener("change", () =>
                         this.updatePenColor(),
                     );
-
+                    this.tempCanvas.addEventListener("wheel", (e) =>
+                        this.handleZoom(e),
+                    );
+                    this.eraserCheckbox.addEventListener("change", () =>
+                        this.toggleEraser(),
+                    );
                     document.addEventListener("keydown", (e) => {
                         if (e.ctrlKey && e.key === "z") {
                             e.preventDefault();
@@ -578,23 +792,53 @@
                     });
                 }
 
+                toggleEraser() {
+                    this.isErasing = this.eraserCheckbox.checked;
+                }
                 resizeCanvas() {
                     const container =
                         document.getElementById("drawing-container");
-                    const tempImageData = this.ctx.getImageData(
-                        0,
-                        0,
-                        this.canvas.width,
-                        this.canvas.height,
+                    const width = container.clientWidth;
+                    const height = container.clientHeight;
+
+                    this.visibleCanvas.width = this.tempCanvas.width = width;
+                    this.visibleCanvas.height = this.tempCanvas.height = height;
+
+                    // Set parent canvas size to be much larger than the visible canvas
+                    this.parentCanvas.width = width * 4;
+                    this.parentCanvas.height = height * 4;
+
+                    [this.visibleCtx, this.tempCtx, this.parentCtx].forEach(
+                        (ctx) => {
+                            ctx.lineCap = ctx.lineJoin = "round";
+                        },
                     );
-                    this.canvas.width = this.tempCanvas.width =
-                        container.clientWidth;
-                    this.canvas.height = this.tempCanvas.height =
-                        container.clientHeight;
-                    this.ctx.putImageData(tempImageData, 0, 0);
-                    [this.ctx, this.tempCtx].forEach((ctx) => {
-                        ctx.lineCap = ctx.lineJoin = "round";
-                    });
+
+                    this.redrawVisibleCanvas();
+                }
+
+                redrawVisibleCanvas() {
+                    this.visibleCtx.clearRect(
+                        0,
+                        0,
+                        this.visibleCanvas.width,
+                        this.visibleCanvas.height,
+                    );
+                    this.visibleCtx.save();
+                    this.visibleCtx.translate(this.offsetX, this.offsetY);
+                    this.visibleCtx.scale(this.scale, this.scale);
+                    this.visibleCtx.drawImage(
+                        this.parentCanvas,
+                        -this.offsetX / this.scale,
+                        -this.offsetY / this.scale,
+                        this.visibleCanvas.width / this.scale,
+                        this.visibleCanvas.height / this.scale,
+                        0,
+                        0,
+                        this.visibleCanvas.width / this.scale,
+                        this.visibleCanvas.height / this.scale,
+                    );
+                    this.visibleCtx.restore();
                 }
 
                 updateMaxBrushSize() {
@@ -604,7 +848,7 @@
 
                 updateBackgroundColor() {
                     const color = this.backgroundColorPicker.value;
-                    this.canvas.style.backgroundColor = color;
+                    this.visibleCanvas.style.backgroundColor = color;
                 }
 
                 updatePenColor() {
@@ -612,25 +856,43 @@
                 }
 
                 updateBrushCursor(e) {
+                    const scaledPoint = this.getScaledPoint(e);
                     const pressure =
                         e.pressure !== undefined ? e.pressure : 0.5;
                     const size = this.calculateCursorSize(pressure);
-                    this.brushCursor.style.left = `${e.clientX - size}px`;
-                    this.brushCursor.style.top = `${e.clientY - size}px`;
+                    this.brushCursor.style.left = `${e.clientX - size / 2}px`;
+                    this.brushCursor.style.top = `${e.clientY - size / 2}px`;
                     this.brushCursor.style.display = "block";
-                    this.brushCursor.setAttribute("width", size * 2);
-                    this.brushCursor.setAttribute("height", size * 2);
-                    this.brushCursor.firstElementChild.setAttribute("cx", size);
-                    this.brushCursor.firstElementChild.setAttribute("cy", size);
+                    this.brushCursor.setAttribute("width", size);
+                    this.brushCursor.setAttribute("height", size);
+                    this.brushCursor.firstElementChild.setAttribute(
+                        "cx",
+                        size / 2,
+                    );
+                    this.brushCursor.firstElementChild.setAttribute(
+                        "cy",
+                        size / 2,
+                    );
                     this.brushCursor.firstElementChild.setAttribute(
                         "r",
-                        size - 1,
+                        size / 2 - 1,
                     );
                     const opacity = 1;
                     this.brushCursor.firstElementChild.setAttribute(
                         "stroke-opacity",
                         opacity,
                     );
+                    if (this.isErasing) {
+                        this.brushCursor.firstElementChild.setAttribute(
+                            "stroke",
+                            "red",
+                        );
+                    } else {
+                        this.brushCursor.firstElementChild.setAttribute(
+                            "stroke",
+                            "black",
+                        );
+                    }
                 }
 
                 calculateCursorSize(pressure) {
@@ -638,91 +900,183 @@
                 }
 
                 calculateBrushSize(pressure) {
-                    return Math.max(1, this.maxBrushSize * pressure);
+                    return Math.max(
+                        1,
+                        (this.maxBrushSize *
+                            (pressure - this.minimumPressure)) /
+                            (1 - this.minimumPressure),
+                    );
                 }
 
                 calculateOpacity(pressure) {
-                    return Math.max(0.1, pressure);
+                    if (pressure < this.minimumPressure) {
+                        return 0;
+                    }
+                    return Math.max(
+                        0.05,
+                        (pressure - this.minimumPressure) /
+                            (1 - this.minimumPressure),
+                    );
                 }
 
                 hideBrushCursor() {
                     this.brushCursor.style.display = "none";
                 }
 
-                startDrawing(e) {
-                    this.isDrawing = true;
-                    this.points = [];
-                    this.lastPoint = null;
-                    this.addPoint(e);
-                }
-
-                draw(e) {
-                    if (!this.isDrawing) return;
+                handleZoom(e) {
                     e.preventDefault();
-                    this.addPoint(e);
-                    this.drawCachedLine();
+                    return;
+
+                    const rect = this.tempCanvas.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+
+                    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+                    const newScale = Math.min(
+                        Math.max(this.scale * zoomFactor, 0.1),
+                        5,
+                    );
+
+                    const newOffsetX =
+                        mouseX -
+                        (mouseX - this.offsetX) * (newScale / this.scale);
+                    const newOffsetY =
+                        mouseY -
+                        (mouseY - this.offsetY) * (newScale / this.scale);
+
+                    this.scale = newScale;
+                    this.offsetX = newOffsetX;
+                    this.offsetY = newOffsetY;
+
+                    this.redrawVisibleCanvas();
                 }
 
-                addPoint(e) {
-                    const pressure = e.pressure || 0;
-                    if (pressure === 0 || pressure === 0.5) return;
-
-                    const newPoint = {
-                        x: e.offsetX,
-                        y: e.offsetY,
-                        pressure: pressure,
-                    };
-
-                    this.points.push(newPoint);
-                    this.lastPoint = newPoint;
+                applyTransform() {
+                    this.ctx.setTransform(
+                        this.scale,
+                        0,
+                        0,
+                        this.scale,
+                        this.offsetX,
+                        this.offsetY,
+                    );
+                    this.tempCtx.setTransform(
+                        this.scale,
+                        0,
+                        0,
+                        this.scale,
+                        this.offsetX,
+                        this.offsetY,
+                    );
                 }
 
-                drawCachedLine() {
+                redrawCanvas() {
+                    this.ctx.save();
+                    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+                    this.ctx.clearRect(
+                        0,
+                        0,
+                        this.visibleCanvas.width,
+                        this.visibleCanvas.height,
+                    );
+                    this.ctx.restore();
+
+                    this.tempCtx.save();
+                    this.tempCtx.setTransform(1, 0, 0, 1, 0, 0);
                     this.tempCtx.clearRect(
                         0,
                         0,
                         this.tempCanvas.width,
                         this.tempCanvas.height,
                     );
+                    this.tempCtx.restore();
+
+                    if (this.undoStack.length > 0) {
+                        const img = new Image();
+                        img.onload = () => {
+                            this.ctx.drawImage(img, 0, 0);
+                        };
+                        img.src = this.undoStack[this.undoStack.length - 1];
+                    }
+                }
+
+                getScaledPoint(e) {
+                    if (!e.pressure) {
+                        return null;
+                    }
+                    const rect = this.tempCanvas.getBoundingClientRect();
+                    const x =
+                        (e.clientX - rect.left - this.offsetX) / this.scale;
+                    const y =
+                        (e.clientY - rect.top - this.offsetY) / this.scale;
+                    return { x, y, pressure: e.pressure || 0.5 };
+                }
+
+                startDrawing(e) {
+                    this.isDrawing = true;
+                    this.points = [];
+                    this.lastPoint = null;
+                    let scaledPoint = this.getScaledPoint(e);
+                    if (scaledPoint) {
+                        this.addPoint(scaledPoint);
+                    }
+                    if (this.isErasing) {
+                        // Copy the current canvas to the temp canvas when starting to erase
+                        this.tempCtx.clearRect(
+                            0,
+                            0,
+                            this.tempCanvas.width,
+                            this.tempCanvas.height,
+                        );
+                        this.tempCtx.drawImage(this.parentCanvas, 0, 0);
+                    }
+                }
+
+                draw(e) {
+                    if (!this.isDrawing) return;
+                    e.preventDefault();
+                    let scaledPoint = this.getScaledPoint(e);
+                    if (scaledPoint) {
+                        this.addPoint(scaledPoint);
+                    }
+                    this.drawCachedLine();
+                }
+
+                addPoint(point) {
+                    if (
+                        point.pressure < this.minimumPressure &&
+                        !this.points.length
+                    )
+                        return;
+                    this.points.push(point);
+                    this.lastPoint = point;
+                }
+
+                drawCachedLine() {
+                    if (this.isErasing) {
+                        // For erasing, we work directly on the temp canvas
+                        this.drawEraserLine();
+                    } else {
+                        // For drawing, we use the original method
+                        this.drawBrushLine();
+                    }
+                }
+
+                drawBrushLine() {
+                    this.tempCtx.clearRect(
+                        0,
+                        0,
+                        this.tempCanvas.width,
+                        this.tempCanvas.height,
+                    );
+                    this.tempCtx.save();
+                    this.tempCtx.translate(this.offsetX, this.offsetY);
+                    this.tempCtx.scale(this.scale, this.scale);
 
                     if (this.points.length < 2) return;
 
                     this.tempCtx.beginPath();
 
-                    const catmullRom = (p0, p1, p2, p3, t) => {
-                        const t2 = t * t;
-                        const t3 = t2 * t;
-                        return {
-                            x:
-                                0.5 *
-                                (2 * p1.x +
-                                    (-p0.x + p2.x) * t +
-                                    (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) *
-                                        t2 +
-                                    (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
-                            y:
-                                0.5 *
-                                (2 * p1.y +
-                                    (-p0.y + p2.y) * t +
-                                    (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) *
-                                        t2 +
-                                    (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
-                            pressure:
-                                0.5 *
-                                (2 * p1.pressure +
-                                    (-p0.pressure + p2.pressure) * t +
-                                    (2 * p0.pressure -
-                                        5 * p1.pressure +
-                                        4 * p2.pressure -
-                                        p3.pressure) *
-                                        t2 +
-                                    (-p0.pressure +
-                                        3 * p1.pressure -
-                                        3 * p2.pressure +
-                                        p3.pressure) *
-                                        t3),
-                        };
-                    };
                     if (this.points.length >= 4) {
                         for (let i = 0; i < this.points.length - 3; i++) {
                             const p0 = this.points[i];
@@ -742,8 +1096,8 @@
                                 this.tempCtx.lineWidth = size;
                                 let color =
                                     this.penColor === "white"
-                                        ? `rgba(255, 255, 255, ${this.calculateOpacity(opacity)})`
-                                        : `rgba(0, 0, 0, ${this.calculateOpacity(opacity)})`;
+                                        ? `rgba(255, 255, 255, ${opacity})`
+                                        : `rgba(0, 0, 0, ${opacity})`;
 
                                 this.tempCtx.strokeStyle = color;
                                 this.tempCtx.lineTo(pt.x, pt.y);
@@ -769,24 +1123,101 @@
                             this.tempCtx.moveTo(point.x, point.y);
                         });
                     }
+
+                    this.tempCtx.restore();
+                }
+
+                drawEraserLine() {
+                    this.tempCtx.save();
+                    this.tempCtx.translate(this.offsetX, this.offsetY);
+                    this.tempCtx.scale(this.scale, this.scale);
+
+                    if (this.points.length < 2) return;
+
+                    this.tempCtx.globalCompositeOperation = "destination-out";
+
+                    if (this.points.length >= 4) {
+                        for (let i = 0; i < this.points.length - 3; i++) {
+                            const p0 = this.points[i];
+                            const p1 = this.points[i + 1];
+                            const p2 = this.points[i + 2];
+                            const p3 = this.points[i + 3];
+
+                            for (let t = 0; t <= 1; t += 0.1) {
+                                const pt = catmullRom(p0, p1, p2, p3, t);
+                                const size = this.calculateBrushSize(
+                                    pt.pressure,
+                                );
+                                const opacity = this.calculateOpacity(
+                                    pt.pressure,
+                                );
+
+                                this.tempCtx.beginPath();
+                                this.tempCtx.arc(
+                                    pt.x,
+                                    pt.y,
+                                    size / 2,
+                                    0,
+                                    Math.PI * 2,
+                                );
+                                this.tempCtx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+                                this.tempCtx.fill();
+                            }
+                        }
+                    } else {
+                        this.points.forEach((point) => {
+                            const size = this.calculateBrushSize(
+                                point.pressure,
+                            );
+                            const opacity = this.calculateOpacity(
+                                point.pressure,
+                            );
+
+                            this.tempCtx.beginPath();
+                            this.tempCtx.arc(
+                                point.x,
+                                point.y,
+                                size / 2,
+                                0,
+                                Math.PI * 2,
+                            );
+                            this.tempCtx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+                            this.tempCtx.fill();
+                        });
+                    }
+
+                    this.tempCtx.restore();
                 }
 
                 stopDrawing() {
                     if (this.isDrawing) {
                         this.isDrawing = false;
-                        this.ctx.drawImage(this.tempCanvas, 0, 0);
+                        if (this.isErasing) {
+                            // When erasing, update the parent canvas with the erased content
+                            this.parentCtx.clearRect(
+                                0,
+                                0,
+                                this.parentCanvas.width,
+                                this.parentCanvas.height,
+                            );
+                            this.parentCtx.drawImage(this.tempCanvas, 0, 0);
+                        } else {
+                            // When drawing, update the parent canvas as before
+                            this.parentCtx.drawImage(this.tempCanvas, 0, 0);
+                        }
                         this.tempCtx.clearRect(
                             0,
                             0,
                             this.tempCanvas.width,
                             this.tempCanvas.height,
                         );
+                        this.redrawVisibleCanvas();
                         this.saveState();
                     }
                 }
 
                 saveState() {
-                    this.undoStack.push(this.canvas.toDataURL());
+                    this.undoStack.push(this.parentCanvas.toDataURL());
                 }
 
                 undo() {
@@ -794,22 +1225,24 @@
                         this.undoStack.pop();
                         const img = new Image();
                         img.onload = () => {
-                            this.ctx.clearRect(
+                            this.parentCtx.clearRect(
                                 0,
                                 0,
-                                this.canvas.width,
-                                this.canvas.height,
+                                this.parentCanvas.width,
+                                this.parentCanvas.height,
                             );
-                            this.ctx.drawImage(img, 0, 0);
+                            this.parentCtx.drawImage(img, 0, 0);
+                            this.redrawVisibleCanvas();
                         };
                         img.src = this.undoStack[this.undoStack.length - 1];
                     } else if (this.undoStack.length === 1) {
-                        this.ctx.clearRect(
+                        this.parentCtx.clearRect(
                             0,
                             0,
-                            this.canvas.width,
-                            this.canvas.height,
+                            this.parentCanvas.width,
+                            this.parentCanvas.height,
                         );
+                        this.redrawVisibleCanvas();
                     }
                 }
             }
