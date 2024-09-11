@@ -201,8 +201,8 @@ const DrawingCanvas = () => {
 
   const handlePointerDown = useCallback(
     (e) => {
-      if (currentPointerTypeRef.current !== "mouse" && e.pointerType === "mouse") {
-        return; // Ignore mouse input if the current interaction started with a non-mouse input
+      if (currentPointerTypeRef.current && currentPointerTypeRef.current !== e.pointerType) {
+        return; // Ignore  input if the current interaction started with a different input
       }
       currentPointerTypeRef.current = e.pointerType;
 
@@ -220,8 +220,8 @@ const DrawingCanvas = () => {
 
   const handlePointerMove = useCallback(
     (e) => {
-      if (currentPointerTypeRef.current !== "mouse" && e.pointerType === "mouse") {
-        return; // Ignore mouse input if the current interaction started with a non-mouse input
+      if (currentPointerTypeRef.current !== e.pointerType) {
+        return; // Ignore  input if the current interaction started with a different input
       }
 
       updateBrushCursor(e);
@@ -237,9 +237,8 @@ const DrawingCanvas = () => {
 
   const handlePointerUp = useCallback(
     (e) => {
-      if (currentPointerTypeRef.current !== "mouse" && e.pointerType === "mouse") {
-        console.log("here?");
-        return; // Ignore mouse input if the current interaction started with a non-mouse input
+      if (currentPointerTypeRef.current !== e.pointerType) {
+        return; // Ignore  input if the current interaction started with a different input
       }
 
       if (isColorPicking) {
