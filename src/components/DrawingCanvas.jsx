@@ -1,45 +1,54 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import StyledSlider from "./myui/StyledSlider";
 import AdvancedColorSelector from "./myui/AdvancedColorSelector";
-import {
-  parseColorHistory,
-  getStrokePoints,
-  drawStroke,
-  saveDrawing,
-  loadDrawing,
-  EraserIcon,
-  RefreshCcw,
-  anyToRgb,
-} from "../lib/drawing-utils";
-import { Pipette as EyeDropper, SprayCan as AirbrushIcon } from "lucide-react";
+import { parseColorHistory, EraserIcon, RefreshCcw } from "../lib/drawing-utils";
+import { Pipette as EyeDropper } from "lucide-react";
 import Layers from "./myui/Layers";
 import { useLayers } from "../hooks/useLayers";
+import Brush from "../lib/brushes/Brush";
 
 const CANVAS_WIDTH = 1000;
 const CANVAS_HEIGHT = 1000;
 
 const DrawingCanvas = () => {
   const fileId = "drawing";
-  const { layers, activeLayer, addStrokeToLayer, undoLastStroke } =
-    useLayers(fileId);
+  const { layers, activeLayer, addStrokeToLayer, undoLastStroke } = useLayers(fileId);
 
+  const canvasWrapperRef = useRef(null);
   const canvasRefs = useRef({});
   const tempCanvasRef = useRef(null);
+  const brushCursorRef = useRef(null);
+  const currentPointerTypeRef = useRef(null);
+  const cursorPositionRef = useRef({ x: 0, y: 0 });
   const [isDrawing, setIsDrawing] = useState(false);
   const [isErasing, setIsErasing] = useState(false);
   const [isColorPicking, setIsColorPicking] = useState(false);
-  const [isAirbrush, setIsAirbrush] = useState(false);
   const [currentStroke, setCurrentStroke] = useState([]);
-  const [opacity, setOpacity] = useState(
-    () => parseFloat(localStorage.getItem("drawingOpacity")) || 1
-  );
-  const [brushSize, setBrushSize] = useState(
-    () => parseFloat(localStorage.getItem("drawingBrushSize")) || 15.97
-  );
-  const [color, setColor] = useState(
-    () => localStorage.getItem("drawingColor") || "hsl(0, 0%, 100%)"
-  );
+  const [opacity, setOpacity] = useState(() => parseFloat(localStorage.getItem("drawingOpacity")) || 1);
+  const [brushSize, setBrushSize] = useState(() => parseFloat(localStorage.getItem("drawingBrushSize")) || 15.97);
+  const [color, setColor] = useState(() => localStorage.getItem("drawingColor") || "hsl(0, 0%, 100%)");
   const [colorHistory, setColorHistory] = useState(() => parseColorHistory());
+  const [selectedBrush, setSelectedBrush] = useState("standard");
+  const [cursorHidden, setCursorHidden] = useState(false);
+
+  const brushes = {
+    standard: new Brush({ type: "standard", name: "Standard Brush" }),
+    airbrush: new Brush({
+      type: "softbrush",
+      name: "Airbrush",
+      modifier: { scatter: 20 },
+    }),
+  };
+
+  useEffect(() => {
+    const undo = (e) => {
+      if (e.ctrlKey && e.key === "z") {
+        e.preventDefault();
+        undoLastStroke();
+      }
+    };
+    document.addEventListener("keydown", undo);
+  }, []);
 
   useEffect(() => {
     layers.forEach((layer) => {
@@ -56,72 +65,6 @@ const DrawingCanvas = () => {
       tempCanvas.height = CANVAS_HEIGHT;
     }
   }, [layers]);
-  const drawAirbrush = useCallback((ctx, x, y, size, color, opacity) => {
-    const [r, g, b] = anyToRgb(color);
-
-    const gradient = ctx.createRadialGradient(x, y, 0, x, y, size / 2);
-    gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${opacity})`);
-    gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(x, y, size / 2, 0, Math.PI * 2);
-    ctx.fill();
-  }, []);
-
-  const applyAirbrush = useCallback(
-    (ctx, points, size, color, opacity) => {
-      const stepSize = size / 4;
-      let distance = 0;
-      let lastX = points[0][0];
-      let lastY = points[0][1];
-
-      const patternOffsets = [
-        [0, 0],
-        [-0.33, -0.33],
-        [0.33, -0.33],
-        [-0.33, 0.33],
-        [0.33, 0.33],
-      ];
-
-      for (let i = 1; i < points.length; i++) {
-        const [x, y] = points[i];
-        const dx = x - lastX;
-        const dy = y - lastY;
-        const segmentLength = Math.sqrt(dx * dx + dy * dy);
-
-        if (segmentLength > 0) {
-          const steps = Math.ceil(segmentLength / stepSize);
-          const xStep = dx / steps;
-          const yStep = dy / steps;
-
-          for (let j = 0; j < steps; j++) {
-            const t = j / steps;
-            const brushX = lastX + t * dx;
-            const brushY = lastY + t * dy;
-
-            // Apply brush strokes in a fixed pattern
-            patternOffsets.forEach(([offsetX, offsetY]) => {
-              const finalX = brushX + offsetX * size * 0.5;
-              const finalY = brushY + offsetY * size * 0.5;
-              drawAirbrush(
-                ctx,
-                finalX,
-                finalY,
-                size * 0.6,
-                color,
-                opacity * 0.4
-              );
-            });
-          }
-        }
-
-        lastX = x;
-        lastY = y;
-      }
-    },
-    [drawAirbrush]
-  );
 
   const redrawCanvas = useCallback(() => {
     layers.forEach((layer) => {
@@ -130,62 +73,33 @@ const DrawingCanvas = () => {
         if (canvas) {
           const ctx = canvas.getContext("2d");
           ctx.clearRect(0, 0, canvas.width, canvas.height);
+
           layer.strokes.forEach((stroke) => {
-            if (stroke.type === "draw") {
-              const strokePoints = getStrokePoints(
-                stroke.points,
-                stroke.brushSize
-              );
-              drawStroke(ctx, strokePoints, stroke.color, stroke.opacity);
-            } else if (stroke.type === "erase") {
-              ctx.globalCompositeOperation = "destination-out";
-              const strokePoints = getStrokePoints(
-                stroke.points,
-                stroke.brushSize
-              );
-              drawStroke(ctx, strokePoints, "black", stroke.opacity);
-              ctx.globalCompositeOperation = "source-over";
-            } else if (stroke.type === "airbrush") {
-              applyAirbrush(
-                ctx,
-                stroke.points,
-                stroke.brushSize,
-                stroke.color,
-                stroke.opacity
-              );
-            }
+            brushes[stroke.brushType].applyStroke(ctx, stroke.points, {
+              size: stroke.brushSize,
+              opacity: stroke.opacity,
+              color: stroke.type === "erase" ? "black" : stroke.color,
+              eraser: stroke.type === "erase",
+            });
           });
         }
       }
     });
+
     if (currentStroke.length > 0) {
       const activeCanvas = canvasRefs.current[activeLayer];
       if (activeCanvas) {
         const ctx = activeCanvas.getContext("2d");
-        if (isErasing) {
-          ctx.globalCompositeOperation = "destination-out";
-          const strokePoints = getStrokePoints(currentStroke, brushSize);
-          drawStroke(ctx, strokePoints, "black", opacity);
-          ctx.globalCompositeOperation = "source-over";
-        } else if (isAirbrush) {
-          applyAirbrush(ctx, currentStroke, brushSize, color, opacity);
-        } else {
-          const strokePoints = getStrokePoints(currentStroke, brushSize);
-          drawStroke(ctx, strokePoints, color, opacity);
-        }
+
+        brushes[selectedBrush].applyStroke(ctx, currentStroke, {
+          size: brushSize,
+          opacity: opacity,
+          color: isErasing ? "black" : color,
+          eraser: isErasing,
+        });
       }
     }
-  }, [
-    layers,
-    currentStroke,
-    isErasing,
-    isAirbrush,
-    opacity,
-    brushSize,
-    color,
-    activeLayer,
-    applyAirbrush,
-  ]);
+  }, [layers, currentStroke, isErasing, opacity, brushSize, color, activeLayer, selectedBrush]);
 
   useEffect(() => {
     redrawCanvas();
@@ -227,8 +141,7 @@ const DrawingCanvas = () => {
       const [r, g, b] = imageData.data;
 
       // Convert RGB to hex
-      const hex =
-        "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+      const hex = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
 
       setColor(hex);
       setIsColorPicking(false);
@@ -236,8 +149,57 @@ const DrawingCanvas = () => {
     [isColorPicking, getCanvasPoint, layers]
   );
 
+  const calculateCursorSize = useCallback(
+    (pressure) => {
+      return Math.max(4, brushSize * Math.max(pressure, 0.5));
+    },
+    [brushSize]
+  );
+
+  const updateBrushCursor = useCallback(
+    (e) => {
+      if (cursorHidden) {
+        setCursorHidden(false);
+      }
+      if (!brushCursorRef.current) return;
+
+      const pressure = e?.pressure !== undefined ? e?.pressure : 0.5;
+      const size = calculateCursorSize(pressure);
+
+      const rect = canvasWrapperRef.current.getBoundingClientRect();
+
+      if (e) {
+        cursorPositionRef.current.x = e.clientX;
+        cursorPositionRef.current.y = e.clientY;
+      }
+      const left = cursorPositionRef.current.x - rect.left - size / 2;
+      const top = cursorPositionRef.current.y - rect.top - size / 2;
+
+      brushCursorRef.current.style.left = `${left}px`;
+      brushCursorRef.current.style.top = `${top}px`;
+      brushCursorRef.current.style.display = "block";
+      brushCursorRef.current.setAttribute("width", size);
+      brushCursorRef.current.setAttribute("height", size);
+
+      const circle = brushCursorRef.current.firstElementChild;
+      if (circle) {
+        circle.setAttribute("cx", size / 2);
+        circle.setAttribute("cy", size / 2);
+        circle.setAttribute("r", size / 2 - 1);
+        circle.setAttribute("stroke-opacity", "1");
+        circle.setAttribute("stroke", isErasing ? "red" : "black");
+      }
+    },
+    [calculateCursorSize, isErasing, cursorHidden]
+  );
+
   const handlePointerDown = useCallback(
     (e) => {
+      if (currentPointerTypeRef.current !== "mouse" && e.pointerType === "mouse") {
+        return; // Ignore mouse input if the current interaction started with a non-mouse input
+      }
+      currentPointerTypeRef.current = e.pointerType;
+
       if (isColorPicking) {
         handleColorPick(e);
       } else {
@@ -252,6 +214,12 @@ const DrawingCanvas = () => {
 
   const handlePointerMove = useCallback(
     (e) => {
+      if (currentPointerTypeRef.current !== "mouse" && e.pointerType === "mouse") {
+        return; // Ignore mouse input if the current interaction started with a non-mouse input
+      }
+
+      updateBrushCursor(e);
+
       if (isDrawing) {
         const [x, y] = getCanvasPoint(e);
         const pressure = e.pressure !== 0 ? e.pressure * e.pressure : 0.5;
@@ -261,44 +229,47 @@ const DrawingCanvas = () => {
     [isDrawing, getCanvasPoint]
   );
 
-  const handlePointerUp = useCallback(() => {
-    if (isColorPicking) {
-      setIsColorPicking(false);
-    } else if (isDrawing && currentStroke.length > 0) {
-      const newStroke = {
-        type: isErasing ? "erase" : isAirbrush ? "airbrush" : "draw",
-        points: currentStroke,
-        opacity: opacity,
-        brushSize: brushSize,
-        color: isErasing ? "black" : color,
-      };
-      addStrokeToLayer(activeLayer, newStroke);
-      if (!isErasing) {
-        setColorHistory((prev) => {
-          const prevColorIndex = prev.findIndex((c) => c === color);
-          if (prevColorIndex !== -1) {
-            prev.splice(prevColorIndex, 1);
-          }
-          const nextHistory = [color, ...prev];
-          localStorage.setItem("colorHistory", JSON.stringify(nextHistory));
-          return nextHistory;
-        });
+  const handlePointerUp = useCallback(
+    (e) => {
+      if (currentPointerTypeRef.current !== "mouse" && e.pointerType === "mouse") {
+        console.log("here?");
+        return; // Ignore mouse input if the current interaction started with a non-mouse input
       }
-    }
-    setIsDrawing(false);
-    setCurrentStroke([]);
-  }, [
-    isDrawing,
-    currentStroke,
-    isErasing,
-    isAirbrush,
-    opacity,
-    brushSize,
-    color,
-    isColorPicking,
-    activeLayer,
-    addStrokeToLayer,
-  ]);
+
+      if (isColorPicking) {
+        setIsColorPicking(false);
+      } else if (isDrawing && currentStroke.length > 0) {
+        const newStroke = {
+          type: isErasing ? "erase" : "draw",
+          points: currentStroke,
+          opacity: opacity,
+          brushSize: brushSize,
+          color: isErasing ? "black" : color,
+          brushType: selectedBrush,
+        };
+        addStrokeToLayer(activeLayer, newStroke);
+        if (!isErasing) {
+          setColorHistory((prev) => {
+            const prevColorIndex = prev.findIndex((c) => c === color);
+            if (prevColorIndex !== -1) {
+              prev.splice(prevColorIndex, 1);
+            }
+            const nextHistory = [color, ...prev];
+            localStorage.setItem("colorHistory", JSON.stringify(nextHistory));
+            return nextHistory;
+          });
+        }
+      }
+      setIsDrawing(false);
+      setCurrentStroke([]);
+      currentPointerTypeRef.current = null;
+    },
+    [isDrawing, currentStroke, isErasing, opacity, brushSize, color, isColorPicking, activeLayer, addStrokeToLayer, selectedBrush]
+  );
+
+  const handlePointerLeave = useCallback(() => {
+    setCursorHidden(true);
+  }, []);
 
   const handleColorChange = useCallback((newColor) => {
     setColor(newColor);
@@ -321,53 +292,30 @@ const DrawingCanvas = () => {
   return (
     <>
       <div className="w-full bg-gray-800 text-white p-2">
-        <AdvancedColorSelector
-          value={color}
-          onChange={handleColorChange}
-          onMove={handleColorMove}
-          quickSwatches={colorHistory}
-        />
+        <AdvancedColorSelector value={color} onChange={handleColorChange} onMove={handleColorMove} quickSwatches={colorHistory} />
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
             <button
-              className={`w-8 h-8 flex items-center justify-center rounded ${
-                isErasing ? "bg-blue-500" : "bg-gray-600"
-              }`}
-              onClick={() => {
-                setIsErasing(!isErasing);
-                setIsAirbrush(false);
-              }}
+              className={`w-8 h-8 flex items-center justify-center rounded ${isErasing ? "bg-blue-500" : "bg-gray-600"}`}
+              onClick={() => setIsErasing(!isErasing)}
               aria-label="Eraser tool"
             >
               <EraserIcon className="w-6 h-6 pointer-events-none" />
             </button>
-            <button
-              className={`w-8 h-8 flex items-center justify-center rounded ${
-                isAirbrush ? "bg-blue-500" : "bg-gray-600"
-              }`}
-              onClick={() => {
-                setIsAirbrush(!isAirbrush);
-                setIsErasing(false);
-              }}
-              aria-label="Airbrush tool"
-            >
-              <AirbrushIcon className="w-6 h-6 pointer-events-none" />
-            </button>
-            <button
-              onClick={() => undoLastStroke()}
-              className="w-8 h-8 flex items-center justify-center bg-gray-600 rounded hover:bg-gray-500"
-            >
+            <button onClick={() => undoLastStroke()} className="w-8 h-8 flex items-center justify-center bg-gray-600 rounded hover:bg-gray-500">
               <RefreshCcw className="w-6 h-6 pointer-events-none" />
             </button>
             <button
-              className={`w-8 h-8 flex items-center justify-center rounded ${
-                isColorPicking ? "bg-blue-500" : "bg-gray-600"
-              }`}
+              className={`w-8 h-8 flex items-center justify-center rounded ${isColorPicking ? "bg-blue-500" : "bg-gray-600"}`}
               onClick={() => setIsColorPicking(!isColorPicking)}
               aria-label="Color picker tool"
             >
               <EyeDropper className="w-6 h-6 pointer-events-none" />
             </button>
+            <select className="bg-gray-600 rounded p-1" value={selectedBrush} onChange={(e) => setSelectedBrush(e.target.value)}>
+              <option value="standard">Standard</option>
+              <option value="airbrush">Airbrush</option>
+            </select>
           </div>
 
           <div className="flex-grow flex items-center space-x-4">
@@ -386,7 +334,7 @@ const DrawingCanvas = () => {
 
             <StyledSlider
               label="Brush Size"
-              min={1}
+              min={0}
               max={500}
               linear={false}
               step={0.01}
@@ -399,20 +347,12 @@ const DrawingCanvas = () => {
           </div>
 
           <div className="flex items-center space-x-2">
-            <button
-              onClick={handleSave}
-              className="px-3 py-1 bg-blue-500 rounded hover:bg-blue-600"
-            >
+            <button onClick={handleSave} className="px-3 py-1 bg-blue-500 rounded hover:bg-blue-600">
               Save
             </button>
             <label className="px-3 py-1 bg-gray-600 rounded hover:bg-gray-500 cursor-pointer">
               Load
-              <input
-                type="file"
-                onChange={handleLoad}
-                accept=".gz"
-                className="hidden"
-              />
+              <input type="file" onChange={handleLoad} accept=".gz" className="hidden" />
             </label>
           </div>
         </div>
@@ -421,10 +361,12 @@ const DrawingCanvas = () => {
       <Layers fileId={fileId} />
 
       <div
-        className="mt-4 relative"
+        className="mt-4 relative cursor-none"
+        ref={canvasWrapperRef}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerLeave}
       >
         {layers.map((layer, index) => (
           <canvas
@@ -439,8 +381,14 @@ const DrawingCanvas = () => {
           />
         ))}
         <canvas ref={tempCanvasRef} className="hidden" />
+        {!cursorHidden && (
+          <svg ref={brushCursorRef} className="absolute pointer-events-none" style={{ zIndex: layers.length + 2 }}>
+            <circle cx="20" cy="20" r="19" fill="none" stroke="black" strokeWidth="1" />
+          </svg>
+        )}
       </div>
     </>
   );
 };
+
 export default DrawingCanvas;
