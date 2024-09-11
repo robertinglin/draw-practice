@@ -24,19 +24,14 @@ export function _getSvgPathFromStroke(points, closed = true) {
   let b = points[1];
   const c = points[2];
 
-  let result = `M${a[0].toFixed(2)},${a[1].toFixed(2)} Q${b[0].toFixed(
+  let result = `M${a[0].toFixed(2)},${a[1].toFixed(2)} Q${b[0].toFixed(2)},${b[1].toFixed(2)} ${average(b[0], c[0]).toFixed(2)},${average(b[1], c[1]).toFixed(
     2
-  )},${b[1].toFixed(2)} ${average(b[0], c[0]).toFixed(2)},${average(
-    b[1],
-    c[1]
-  ).toFixed(2)} T`;
+  )} T`;
 
   for (let i = 2, max = len - 1; i < max; i++) {
     a = points[i];
     b = points[i + 1];
-    result += `${average(a[0], b[0]).toFixed(2)},${average(a[1], b[1]).toFixed(
-      2
-    )} `;
+    result += `${average(a[0], b[0]).toFixed(2)},${average(a[1], b[1]).toFixed(2)} `;
   }
 
   if (closed) {
@@ -47,17 +42,19 @@ export function _getSvgPathFromStroke(points, closed = true) {
 }
 
 export function getSvgPathFromStroke(stroke) {
-  const faces = polygonClipping.union([stroke]);
-
-  const d = [];
-
-  faces.forEach((face) =>
-    face.forEach((points) => {
-      d.push(_getSvgPathFromStroke(points));
-    })
-  );
-
-  return d.join(" ");
+  try {
+    const faces = polygonClipping.union([stroke]);
+    const d = [];
+    faces.forEach((face) =>
+      face.forEach((points) => {
+        d.push(_getSvgPathFromStroke(points));
+      })
+    );
+    return d.join(" ");
+  } catch (error) {
+    console.warn("Polygon clipping failed, falling back to original stroke:", error);
+    return _getSvgPathFromStroke(stroke);
+  }
 }
 
 export const getStrokePoints = (stroke, size) => {
@@ -121,42 +118,16 @@ export const loadDrawing = (file) => {
 
 export const EraserIcon = (props) => (
   <span {...props}>
-    <svg
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M18 13L11 20L4 13L11 6L18 13Z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M20 20H11"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18 13L11 20L4 13L11 6L18 13Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M20 20H11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   </span>
 );
 
 export const RefreshCcw = (props) => (
   <span {...props}>
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 7v6h6" />
       <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13" />
     </svg>

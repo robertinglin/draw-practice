@@ -12,7 +12,7 @@ const CANVAS_HEIGHT = 1000;
 
 const DrawingCanvas = () => {
   const fileId = "drawing";
-  const { layers, activeLayer, addStrokeToLayer, undoLastStroke } = useLayers(fileId);
+  const { layers, activeLayer, addStrokeToLayer, undo } = useLayers(fileId);
 
   const canvasWrapperRef = useRef(null);
   const canvasRefs = useRef({});
@@ -41,13 +41,17 @@ const DrawingCanvas = () => {
   };
 
   useEffect(() => {
-    const undo = (e) => {
+    const _undo = (e) => {
       if (e.ctrlKey && e.key === "z") {
         e.preventDefault();
-        undoLastStroke();
+        e.stopPropagation();
+        if (!currentPointerTypeRef.current) {
+          undo();
+        }
       }
     };
-    document.addEventListener("keydown", undo);
+    document.addEventListener("keydown", _undo);
+    return () => document.removeEventListener("keydown", _undo);
   }, []);
 
   useEffect(() => {
@@ -73,6 +77,8 @@ const DrawingCanvas = () => {
         if (canvas) {
           const ctx = canvas.getContext("2d");
           ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          console.log(layer.strokes);
 
           layer.strokes.forEach((stroke) => {
             brushes[stroke.brushType].applyStroke(ctx, stroke.points, {
@@ -302,7 +308,7 @@ const DrawingCanvas = () => {
             >
               <EraserIcon className="w-6 h-6 pointer-events-none" />
             </button>
-            <button onClick={() => undoLastStroke()} className="w-8 h-8 flex items-center justify-center bg-gray-600 rounded hover:bg-gray-500">
+            <button onMouseDown={() => undo()} className="w-8 h-8 flex items-center justify-center bg-gray-600 rounded hover:bg-gray-500">
               <RefreshCcw className="w-6 h-6 pointer-events-none" />
             </button>
             <button
