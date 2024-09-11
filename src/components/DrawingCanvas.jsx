@@ -5,7 +5,7 @@ import { parseColorHistory, EraserIcon, RefreshCcw } from "../lib/drawing-utils"
 import { Pipette as EyeDropper } from "lucide-react";
 import Layers from "./myui/Layers";
 import { useLayers } from "../hooks/useLayers";
-import Brush from "../lib/brushes/Brush";
+import draw from "../lib/draw";
 
 const CANVAS_WIDTH = 1000;
 const CANVAS_HEIGHT = 1000;
@@ -15,7 +15,7 @@ const DrawingCanvas = () => {
   const { layers, activeLayer, addStrokeToLayer, undo } = useLayers(fileId);
 
   const canvasWrapperRef = useRef(null);
-  const canvasRefs = useRef({});
+  const canvasCacheRef = useRef({});
   const tempCanvasRef = useRef(null);
   const brushCursorRef = useRef(null);
   const currentPointerTypeRef = useRef(null);
@@ -31,17 +31,8 @@ const DrawingCanvas = () => {
   const [selectedBrush, setSelectedBrush] = useState("standard");
   const [cursorHidden, setCursorHidden] = useState(false);
 
-  const brushes = {
-    standard: new Brush({ type: "standard", name: "Standard Brush" }),
-    airbrush: new Brush({
-      type: "softbrush",
-      name: "Airbrush",
-      modifier: { scatter: 20 },
-    }),
-  };
-
   useEffect(() => {
-    const _undo = (e) => {
+    const handleUndo = (e) => {
       if (e.ctrlKey && e.key === "z") {
         e.preventDefault();
         e.stopPropagation();
@@ -50,73 +41,41 @@ const DrawingCanvas = () => {
         }
       }
     };
-    document.addEventListener("keydown", _undo);
-    return () => document.removeEventListener("keydown", _undo);
-  }, []);
+    document.addEventListener("keydown", handleUndo);
+    return () => document.removeEventListener("keydown", handleUndo);
+  }, [undo]);
 
   useEffect(() => {
+    const activeStroke = currentStroke
+      ? {
+          type: isErasing ? "erase" : "draw",
+          points: currentStroke,
+          opacity: opacity,
+          brushSize: brushSize,
+          color: isErasing ? "black" : color,
+          brushType: selectedBrush,
+          layerId: activeLayer,
+        }
+      : undefined;
+    canvasCacheRef.current = draw(CANVAS_WIDTH, CANVAS_HEIGHT, { layers }, canvasCacheRef.current, activeStroke);
+
+    // Update the DOM with the new canvas states
     layers.forEach((layer) => {
-      const canvas = canvasRefs.current[layer.id];
+      const canvas = canvasCacheRef.current[layer.id]?.canvas;
       if (canvas) {
-        canvas.width = CANVAS_WIDTH;
-        canvas.height = CANVAS_HEIGHT;
-      }
-    });
-
-    const tempCanvas = tempCanvasRef.current;
-    if (tempCanvas) {
-      tempCanvas.width = CANVAS_WIDTH;
-      tempCanvas.height = CANVAS_HEIGHT;
-    }
-  }, [layers]);
-
-  const redrawCanvas = useCallback(() => {
-    layers.forEach((layer) => {
-      if (layer.visible) {
-        const canvas = canvasRefs.current[layer.id];
-        if (canvas) {
-          const ctx = canvas.getContext("2d");
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-          console.log(layer.strokes);
-
-          layer.strokes.forEach((stroke) => {
-            brushes[stroke.brushType].applyStroke(ctx, stroke.points, {
-              size: stroke.brushSize,
-              opacity: stroke.opacity,
-              color: stroke.type === "erase" ? "black" : stroke.color,
-              eraser: stroke.type === "erase",
-            });
-          });
+        const domCanvas = document.getElementById(layer.id);
+        if (domCanvas && domCanvas instanceof HTMLCanvasElement) {
+          const ctx = domCanvas.getContext("2d");
+          ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+          ctx.drawImage(canvas, 0, 0);
         }
       }
     });
-
-    if (currentStroke.length > 0) {
-      const activeCanvas = canvasRefs.current[activeLayer];
-      if (activeCanvas) {
-        const ctx = activeCanvas.getContext("2d");
-
-        brushes[selectedBrush].applyStroke(ctx, currentStroke, {
-          size: brushSize,
-          opacity: opacity,
-          color: isErasing ? "black" : color,
-          eraser: isErasing,
-        });
-      }
-    }
-  }, [layers, currentStroke, isErasing, opacity, brushSize, color, activeLayer, selectedBrush]);
-
-  useEffect(() => {
-    redrawCanvas();
-  }, [redrawCanvas]);
+  }, [layers, fileId, currentStroke]);
 
   const getCanvasPoint = useCallback(
     (e) => {
-      const activeCanvas = canvasRefs.current[activeLayer];
-      if (!activeCanvas) return [0, 0];
-
-      const rect = activeCanvas.getBoundingClientRect();
+      const rect = canvasWrapperRef.current.getBoundingClientRect();
       return [e.clientX - rect.left, e.clientY - rect.top];
     },
     [activeLayer]
@@ -136,7 +95,7 @@ const DrawingCanvas = () => {
 
       layers.forEach((layer) => {
         if (layer.visible) {
-          const layerCanvas = canvasRefs.current[layer.id];
+          const layerCanvas = canvasCacheRef.current[layer.id];
           tempCtx.globalCompositeOperation = layer.blendMode;
           tempCtx.drawImage(layerCanvas, 0, 0);
         }
@@ -202,7 +161,7 @@ const DrawingCanvas = () => {
   const handlePointerDown = useCallback(
     (e) => {
       if (currentPointerTypeRef.current && currentPointerTypeRef.current !== e.pointerType) {
-        return; // Ignore  input if the current interaction started with a different input
+        return; // Ignore input if the current interaction started with a different input
       }
       currentPointerTypeRef.current = e.pointerType;
 
@@ -220,11 +179,10 @@ const DrawingCanvas = () => {
 
   const handlePointerMove = useCallback(
     (e) => {
-      if (currentPointerTypeRef.current !== e.pointerType) {
-        return; // Ignore  input if the current interaction started with a different input
-      }
-
       updateBrushCursor(e);
+      if (currentPointerTypeRef.current !== e.pointerType) {
+        return; // Ignore input if the current interaction started with a different input
+      }
 
       if (isDrawing) {
         const [x, y] = getCanvasPoint(e);
@@ -232,13 +190,13 @@ const DrawingCanvas = () => {
         setCurrentStroke((prev) => [...prev, [x, y, pressure]]);
       }
     },
-    [isDrawing, getCanvasPoint]
+    [isDrawing, getCanvasPoint, updateBrushCursor]
   );
 
   const handlePointerUp = useCallback(
     (e) => {
       if (currentPointerTypeRef.current !== e.pointerType) {
-        return; // Ignore  input if the current interaction started with a different input
+        return; // Ignore input if the current interaction started with a different input
       }
 
       if (isColorPicking) {
@@ -297,7 +255,7 @@ const DrawingCanvas = () => {
   return (
     <>
       <div className="w-full bg-gray-800 text-white p-2">
-        <AdvancedColorSelector value={color} onChange={handleColorChange} onMove={handleColorMove} quickSwatches={colorHistory} />
+        <AdvancedColorSelector value={color} onChange={handleColorChange} quickSwatches={colorHistory} />
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
             <button
@@ -376,8 +334,10 @@ const DrawingCanvas = () => {
         {layers.map((layer, index) => (
           <canvas
             key={layer.id}
-            ref={(el) => (canvasRefs.current[layer.id] = el)}
+            id={layer.id}
             className="absolute top-0 left-0 border border-gray-300 touch-none"
+            width={CANVAS_WIDTH}
+            height={CANVAS_HEIGHT}
             style={{
               zIndex: index + 1,
               display: layer.visible ? "block" : "none",

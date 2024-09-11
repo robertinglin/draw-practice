@@ -77,7 +77,6 @@ export const getStrokePoints = (stroke, size) => {
 };
 
 export const drawStroke = (ctx, strokePoints, strokeColor, strokeOpacity) => {
-  console.log("strokeColor", strokeColor);
   ctx.fillStyle = strokeColor;
   ctx.globalAlpha = strokeOpacity;
 

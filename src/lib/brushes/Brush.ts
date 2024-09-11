@@ -145,7 +145,7 @@ interface StrokeOptions {
   size: number;
   opacity: number;
   color: string;
-  variablePressure: boolean;
+  variablePressure?: boolean;
   eraser: boolean;
 }
 
