@@ -120,13 +120,17 @@ const DrawingCanvas = () => {
     },
     [selectedTool, getCanvasPoint, layers]
   );
-
   const handleFill = useCallback(
     (e) => {
       if (selectedTool !== "fill") return;
-
       const [x, y] = getCanvasPoint(e);
-      addFillToLayer(activeLayer, { x, y, color, opacity });
+      addFillToLayer(activeLayer, {
+        startPoint: [x, y, 0],
+        color,
+        opacity,
+        tolerance: 0.1,
+        contiguous: true,
+      });
     },
     [selectedTool, getCanvasPoint, activeLayer, addFillToLayer, color, opacity]
   );

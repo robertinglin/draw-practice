@@ -1,10 +1,11 @@
 import Brush from "../lib/brushes/Brush";
+import { anyToRgb } from "./drawing-utils";
 
 type Point = [number, number, number];
 
 interface Stroke {
   id: string;
-  type: "draw" | "erase";
+  type: "draw" | "erase" | "fill";
   points: Point[];
   opacity: number;
   brushSize: number;
@@ -12,11 +13,20 @@ interface Stroke {
   brushType: string;
 }
 
+interface FillStroke extends Omit<Stroke, "brushSize" | "brushType"> {
+  type: "fill";
+  points: [Point];
+  tolerance: number;
+  contiguous: boolean;
+}
+
+type AnyStroke = Stroke | FillStroke;
+
 interface Layer {
   id: string;
   visible: boolean;
   blendMode: string;
-  strokes: Stroke[];
+  strokes: AnyStroke[];
 }
 
 interface DrawingState {
@@ -45,13 +55,85 @@ function createCanvas(width: number, height: number): HTMLCanvasElement {
   return canvas;
 }
 
-function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
-  brushes[stroke.brushType].applyStroke(ctx, stroke.points, {
-    size: stroke.brushSize,
-    opacity: stroke.opacity,
-    color: stroke.type === "erase" ? "black" : stroke.color,
-    eraser: stroke.type === "erase",
-  });
+function drawStroke(ctx: CanvasRenderingContext2D, stroke: AnyStroke): void {
+  if (stroke.type === "fill") {
+    fillArea(ctx, stroke as FillStroke);
+  } else {
+    brushes[stroke.brushType].applyStroke(ctx, stroke.points, {
+      size: stroke.brushSize,
+      opacity: stroke.opacity,
+      color: stroke.type === "erase" ? "black" : stroke.color,
+      eraser: stroke.type === "erase",
+    });
+  }
+}
+function fillArea(ctx: CanvasRenderingContext2D, fillStroke: FillStroke): void {
+  const [startPoint] = fillStroke.points;
+  const startX = Math.round(startPoint[0]);
+  const startY = Math.round(startPoint[1]);
+  const startColor = getPixelColor(ctx, startX, startY);
+  const fillColor = anyToRgb(fillStroke.color);
+  const fillColorWithOpacity = [...fillColor, Math.round(fillStroke.opacity * 255)];
+
+  const imageData = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height);
+  const { width, height } = ctx.canvas;
+
+  if (fillStroke.contiguous) {
+    const visited = new Set<number>();
+    const pixelStack: number[] = [startX, startY];
+
+    while (pixelStack.length > 0) {
+      const y = pixelStack.pop()!;
+      const x = pixelStack.pop()!;
+      const currentIndex = (y * width + x) * 4;
+
+      if (visited.has(currentIndex)) continue;
+
+      if (colorMatch(imageData.data, currentIndex, startColor, fillStroke.tolerance)) {
+        setPixelColor(imageData.data, currentIndex, fillColorWithOpacity);
+        visited.add(currentIndex);
+
+        if (x > 0) pixelStack.push(x - 1, y);
+        if (x < width - 1) pixelStack.push(x + 1, y);
+        if (y > 0) pixelStack.push(x, y - 1);
+        if (y < height - 1) pixelStack.push(x, y + 1);
+      }
+    }
+  } else {
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      if (colorMatch(imageData.data, i, startColor, fillStroke.tolerance)) {
+        setPixelColor(imageData.data, i, fillColorWithOpacity);
+      }
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+}
+
+function getPixelColor(ctx: CanvasRenderingContext2D, x: number, y: number): number[] {
+  const imageData = ctx.getImageData(x, y, 1, 1);
+  return Array.from(imageData.data);
+}
+
+function hexToRgba(hex: string, opacity: number): number[] {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return [r, g, b, Math.round(opacity * 255)];
+}
+
+function colorMatch(data: Uint8ClampedArray, index: number, target: number[], tolerance: number): boolean {
+  const r = Math.abs(data[index] - target[0]);
+  const g = Math.abs(data[index + 1] - target[1]);
+  const b = Math.abs(data[index + 2] - target[2]);
+  return Math.max(r, g, b) <= tolerance * 255;
+}
+
+function setPixelColor(data: Uint8ClampedArray, index: number, color: number[]): void {
+  data[index] = color[0];
+  data[index + 1] = color[1];
+  data[index + 2] = color[2];
+  data[index + 3] = color[3];
 }
 
 function drawLayer(canvas: HTMLCanvasElement, layer: Layer): string | null {
@@ -91,7 +173,7 @@ export default function draw(
   height: number,
   state: DrawingState,
   prevCanvasCache?: CanvasCache,
-  activeStroke?: Stroke & { layerId: string }
+  activeStroke?: AnyStroke & { layerId: string }
 ): CanvasCache {
   const canvasCache: CanvasCache = prevCanvasCache || {};
 

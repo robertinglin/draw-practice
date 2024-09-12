@@ -287,10 +287,23 @@ export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
   );
 
   const addFillToLayer = useCallback(
-    (layerId: number, fillOptions: Omit<FillStroke, "id" | "type">) => {
+    (
+      layerId: number,
+      fillOptions: {
+        startPoint: [number, number, number];
+        color: string;
+        opacity: number;
+        tolerance: number;
+        contiguous: boolean;
+      }
+    ) => {
       const fillStroke: Omit<FillStroke, "id"> = {
-        ...fillOptions,
         type: "fill",
+        points: [fillOptions.startPoint],
+        color: fillOptions.color,
+        opacity: fillOptions.opacity,
+        tolerance: fillOptions.tolerance,
+        contiguous: fillOptions.contiguous,
       };
       addStrokeToLayer(layerId, fillStroke);
     },
