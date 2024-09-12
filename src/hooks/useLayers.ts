@@ -9,12 +9,21 @@ export interface Layer {
 
 export interface Stroke {
   id: string;
-  type: "draw" | "erase";
+  type: "draw" | "erase" | "fill";
   points: [number, number, number][];
   opacity: number;
   brushSize: number;
   color: string;
 }
+
+export interface FillStroke extends Omit<Stroke, "brushSize"> {
+  type: "fill";
+  points: [[number, number, number]];
+  tolerance: number;
+  contiguous: boolean;
+}
+
+export type AnyStroke = Stroke | FillStroke;
 
 interface Action {
   type: "ADD_LAYER" | "REMOVE_LAYER" | "TOGGLE_VISIBILITY" | "CHANGE_BLEND_MODE" | "ADD_STROKE" | "SET_ACTIVE_LAYER";
@@ -40,6 +49,16 @@ interface LayersState {
 interface BranchingHistory {
   root: HistoryNode;
   current: HistoryNode;
+}
+
+export interface Fill {
+  id: string;
+  startPoint: [number, number];
+  color: string;
+  opacity: number;
+  tolerance: number;
+  contiguous: boolean;
+  mode: "normal" | "multiply" | "screen" | "overlay" | "darken" | "lighten";
 }
 
 // Global state store
@@ -85,7 +104,7 @@ const useGlobalStore = (fileId: string, initialLayers: Layer[] = []) => {
   return [store, updateStore] as const;
 };
 
-let strokeCounter = 0; // Atomic counter for stroke IDs
+let strokeCounter = 0;
 
 const getUniqueStrokeId = () => {
   strokeCounter += 1;
@@ -120,6 +139,9 @@ export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
           break;
         case "SET_ACTIVE_LAYER":
           newState.activeLayer = action.layerId!;
+          break;
+        case "ADD_STROKE":
+          newState.layers = newState.layers.map((layer) => (layer.id === action.layerId ? { ...layer, strokes: [...layer.strokes, action.data] } : layer));
           break;
       }
 
@@ -254,14 +276,25 @@ export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
   );
 
   const addStrokeToLayer = useCallback(
-    (layerId: number, stroke: Omit<Stroke, "id">) => {
-      const newStroke: Stroke = {
+    (layerId: number, stroke: Omit<Stroke, "id"> | Omit<FillStroke, "id">) => {
+      const newStroke: AnyStroke = {
         ...stroke,
         id: getUniqueStrokeId(),
       };
       applyAction({ type: "ADD_STROKE", layerId, data: newStroke });
     },
     [applyAction]
+  );
+
+  const addFillToLayer = useCallback(
+    (layerId: number, fillOptions: Omit<FillStroke, "id" | "type">) => {
+      const fillStroke: Omit<FillStroke, "id"> = {
+        ...fillOptions,
+        type: "fill",
+      };
+      addStrokeToLayer(layerId, fillStroke);
+    },
+    [addStrokeToLayer]
   );
 
   return {
@@ -273,6 +306,7 @@ export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
     toggleLayerVisibility,
     changeLayerBlendMode,
     addStrokeToLayer,
+    addFillToLayer,
     undo,
     redo,
     getBranchingStructure,

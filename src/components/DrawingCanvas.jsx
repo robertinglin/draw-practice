@@ -1,18 +1,19 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import StyledSlider from "./myui/StyledSlider";
 import AdvancedColorSelector from "./myui/AdvancedColorSelector";
-import { parseColorHistory, EraserIcon, RefreshCcw, RefreshCw } from "../lib/drawing-utils";
-import { Pipette as EyeDropper } from "lucide-react";
+import { parseColorHistory, EraserIcon, RefreshCcw, RefreshCw, rgbToHsl } from "../lib/drawing-utils";
+import { Pipette as EyeDropper, PaintBucket as Fill, Brush } from "lucide-react";
 import Layers from "./myui/Layers";
 import { useLayers } from "../hooks/useLayers";
 import draw from "../lib/draw";
+import BrushSelector from "./myui/BrushSelector";
 
 const CANVAS_WIDTH = 1000;
 const CANVAS_HEIGHT = 1000;
 
 const DrawingCanvas = () => {
   const fileId = "drawing";
-  const { layers, activeLayer, addStrokeToLayer, undo, redo } = useLayers(fileId);
+  const { layers, activeLayer, addStrokeToLayer, undo, redo, addFillToLayer } = useLayers(fileId);
 
   const canvasWrapperRef = useRef(null);
   const canvasCacheRef = useRef({});
@@ -22,7 +23,6 @@ const DrawingCanvas = () => {
   const cursorPositionRef = useRef({ x: 0, y: 0 });
   const [isDrawing, setIsDrawing] = useState(false);
   const [isErasing, setIsErasing] = useState(false);
-  const [isColorPicking, setIsColorPicking] = useState(false);
   const [currentStroke, setCurrentStroke] = useState([]);
   const [opacity, setOpacity] = useState(() => parseFloat(localStorage.getItem("drawingOpacity")) || 1);
   const [brushSize, setBrushSize] = useState(() => parseFloat(localStorage.getItem("drawingBrushSize")) || 15.97);
@@ -30,6 +30,11 @@ const DrawingCanvas = () => {
   const [colorHistory, setColorHistory] = useState(() => parseColorHistory());
   const [selectedBrush, setSelectedBrush] = useState("standard");
   const [cursorHidden, setCursorHidden] = useState(false);
+  const [selectedTool, setSelectedTool] = useState("brush");
+
+  const handleBrushSelect = (brushType) => {
+    setSelectedBrush(brushType);
+  };
 
   useEffect(() => {
     const handleUndo = (e) => {
@@ -87,7 +92,7 @@ const DrawingCanvas = () => {
 
   const handleColorPick = useCallback(
     (e) => {
-      if (!isColorPicking) return;
+      if (selectedTool !== "color-picker") return;
 
       const [x, y] = getCanvasPoint(e);
 
@@ -99,7 +104,7 @@ const DrawingCanvas = () => {
 
       layers.forEach((layer) => {
         if (layer.visible) {
-          const layerCanvas = canvasCacheRef.current[layer.id];
+          const layerCanvas = canvasCacheRef.current[layer.id].canvas;
           tempCtx.globalCompositeOperation = layer.blendMode;
           tempCtx.drawImage(layerCanvas, 0, 0);
         }
@@ -109,13 +114,21 @@ const DrawingCanvas = () => {
       const imageData = tempCtx.getImageData(x, y, 1, 1);
       const [r, g, b] = imageData.data;
 
-      // Convert RGB to hex
-      const hex = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-
-      setColor(hex);
-      setIsColorPicking(false);
+      // convert hsl to hsl string
+      const hsl = rgbToHsl(r, g, b);
+      handleColorChange(hsl);
     },
-    [isColorPicking, getCanvasPoint, layers]
+    [selectedTool, getCanvasPoint, layers]
+  );
+
+  const handleFill = useCallback(
+    (e) => {
+      if (selectedTool !== "fill") return;
+
+      const [x, y] = getCanvasPoint(e);
+      addFillToLayer(activeLayer, { x, y, color, opacity });
+    },
+    [selectedTool, getCanvasPoint, activeLayer, addFillToLayer, color, opacity]
   );
 
   const calculateCursorSize = useCallback(
@@ -156,10 +169,10 @@ const DrawingCanvas = () => {
         circle.setAttribute("cy", size / 2);
         circle.setAttribute("r", size / 2 - 1);
         circle.setAttribute("stroke-opacity", "1");
-        circle.setAttribute("stroke", isErasing ? "red" : "black");
+        circle.setAttribute("stroke", isErasing && selectedTool === "brush" ? "red" : "black");
       }
     },
-    [calculateCursorSize, isErasing, cursorHidden]
+    [calculateCursorSize, isErasing, cursorHidden, selectedTool]
   );
 
   const handlePointerDown = useCallback(
@@ -169,16 +182,18 @@ const DrawingCanvas = () => {
       }
       currentPointerTypeRef.current = e.pointerType;
 
-      if (isColorPicking) {
+      if (selectedTool === "color-picker") {
         handleColorPick(e);
-      } else {
+      } else if (selectedTool === "fill") {
+        handleFill(e);
+      } else if (selectedTool === "brush") {
         setIsDrawing(true);
         const [x, y] = getCanvasPoint(e);
         const pressure = e.pressure !== 0 ? e.pressure * e.pressure : 0.5;
         setCurrentStroke([[x, y, pressure]]);
       }
     },
-    [isColorPicking, getCanvasPoint, handleColorPick]
+    [selectedTool, handleColorPick, handleFill, getCanvasPoint]
   );
 
   const handlePointerMove = useCallback(
@@ -188,13 +203,13 @@ const DrawingCanvas = () => {
         return; // Ignore input if the current interaction started with a different input
       }
 
-      if (isDrawing) {
+      if (isDrawing && selectedTool === "brush") {
         const [x, y] = getCanvasPoint(e);
         const pressure = e.pressure !== 0 ? e.pressure * e.pressure : 0.5;
         setCurrentStroke((prev) => [...prev, [x, y, pressure]]);
       }
     },
-    [isDrawing, getCanvasPoint, updateBrushCursor]
+    [isDrawing, getCanvasPoint, updateBrushCursor, selectedTool]
   );
 
   const handlePointerUp = useCallback(
@@ -203,9 +218,7 @@ const DrawingCanvas = () => {
         return; // Ignore input if the current interaction started with a different input
       }
 
-      if (isColorPicking) {
-        setIsColorPicking(false);
-      } else if (isDrawing && currentStroke.length > 0) {
+      if (selectedTool === "brush" && isDrawing && currentStroke.length > 0) {
         const newStroke = {
           type: isErasing ? "erase" : "draw",
           points: currentStroke,
@@ -231,7 +244,7 @@ const DrawingCanvas = () => {
       setCurrentStroke([]);
       currentPointerTypeRef.current = null;
     },
-    [isDrawing, currentStroke, isErasing, opacity, brushSize, color, isColorPicking, activeLayer, addStrokeToLayer, selectedBrush]
+    [selectedTool, isDrawing, currentStroke, isErasing, opacity, brushSize, color, activeLayer, addStrokeToLayer, selectedBrush]
   );
 
   const handlePointerLeave = useCallback(() => {
@@ -239,6 +252,7 @@ const DrawingCanvas = () => {
   }, []);
 
   const handleColorChange = useCallback((newColor) => {
+    console.log(newColor);
     setColor(newColor);
     localStorage.setItem("drawingColor", newColor);
   }, []);
@@ -260,15 +274,18 @@ const DrawingCanvas = () => {
     <>
       <div className="w-full bg-gray-800 text-white p-2">
         <AdvancedColorSelector value={color} onChange={handleColorChange} quickSwatches={colorHistory} />
+        <BrushSelector selectedBrush={selectedBrush} onBrushSelect={handleBrushSelect} />
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
-            <button
-              className={`w-8 h-8 flex items-center justify-center rounded ${isErasing ? "bg-blue-500" : "bg-gray-600"}`}
-              onClick={() => setIsErasing(!isErasing)}
-              aria-label="Eraser tool"
-            >
-              <EraserIcon className="w-6 h-6 pointer-events-none" />
-            </button>
+            {selectedTool === "brush" && (
+              <button
+                className={`w-8 h-8 flex items-center justify-center rounded ${isErasing ? "bg-blue-500" : "bg-gray-600"}`}
+                onClick={() => setIsErasing(!isErasing)}
+                aria-label="Eraser tool"
+              >
+                <EraserIcon className="w-6 h-6 pointer-events-none" />
+              </button>
+            )}
             <button onMouseDown={() => undo()} className="w-8 h-8 flex items-center justify-center bg-gray-600 rounded hover:bg-gray-500">
               <RefreshCcw className="w-6 h-6 pointer-events-none" />
             </button>
@@ -276,18 +293,27 @@ const DrawingCanvas = () => {
               <RefreshCw className="w-6 h-6 pointer-events-none" />
             </button>
             <button
-              className={`w-8 h-8 flex items-center justify-center rounded ${isColorPicking ? "bg-blue-500" : "bg-gray-600"}`}
-              onClick={() => setIsColorPicking(!isColorPicking)}
+              className={`w-8 h-8 flex items-center justify-center rounded ${selectedTool === "color-picker" ? "bg-blue-500" : "bg-gray-600"}`}
+              onClick={() => setSelectedTool("color-picker")}
               aria-label="Color picker tool"
             >
               <EyeDropper className="w-6 h-6 pointer-events-none" />
             </button>
-            <select className="bg-gray-600 rounded p-1" value={selectedBrush} onChange={(e) => setSelectedBrush(e.target.value)}>
-              <option value="standard">Standard</option>
-              <option value="airbrush">Airbrush</option>
-            </select>
+            <button
+              className={`w-8 h-8 flex items-center justify-center rounded ${selectedTool === "brush" ? "bg-blue-500" : "bg-gray-600"}`}
+              onClick={() => setSelectedTool("brush")}
+              aria-label="Paint brush tool"
+            >
+              <Brush className="w-6 h-6 pointer-events-none" />
+            </button>
+            <button
+              className={`w-8 h-8 flex items-center justify-center rounded ${selectedTool === "fill" ? "bg-blue-500" : "bg-gray-600"}`}
+              onClick={() => setSelectedTool("fill")}
+              aria-label="Fill tool"
+            >
+              <Fill className="w-6 h-6 pointer-events-none" />
+            </button>
           </div>
-
           <div className="flex-grow flex items-center space-x-4">
             <StyledSlider
               label="Opacity"
