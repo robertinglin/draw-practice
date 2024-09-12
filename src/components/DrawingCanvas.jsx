@@ -7,6 +7,7 @@ import Layers from "./myui/Layers";
 import { useLayers } from "../hooks/useLayers";
 import draw from "../lib/draw";
 import BrushSelector from "./myui/BrushSelector";
+import { ColorPickerTool, BrushTool, FillTool } from "./myui/Tools";
 
 const CANVAS_WIDTH = 1000;
 const CANVAS_HEIGHT = 1000;
@@ -31,6 +32,8 @@ const DrawingCanvas = () => {
   const [selectedBrush, setSelectedBrush] = useState("standard");
   const [cursorHidden, setCursorHidden] = useState(false);
   const [selectedTool, setSelectedTool] = useState("brush");
+  const [contiguous, setContiguous] = useState(true);
+  const [tolerance, setTolerance] = useState(0.1);
 
   const handleBrushSelect = (brushType) => {
     setSelectedBrush(brushType);
@@ -120,21 +123,20 @@ const DrawingCanvas = () => {
     },
     [selectedTool, getCanvasPoint, layers]
   );
+
   const handleFill = useCallback(
     (e) => {
-      if (selectedTool !== "fill") return;
       const [x, y] = getCanvasPoint(e);
       addFillToLayer(activeLayer, {
         startPoint: [x, y, 0],
         color,
         opacity,
-        tolerance: 0.1,
-        contiguous: true,
+        tolerance,
+        contiguous,
       });
     },
-    [selectedTool, getCanvasPoint, activeLayer, addFillToLayer, color, opacity]
+    [getCanvasPoint, activeLayer, addFillToLayer, color, opacity, tolerance, contiguous]
   );
-
   const calculateCursorSize = useCallback(
     (pressure) => {
       return Math.max(4, brushSize * Math.max(pressure, 0.5));
@@ -273,6 +275,8 @@ const DrawingCanvas = () => {
     // Implement load functionality
   }, []);
 
+  console.log(brushSize, opacity);
+
   return (
     <>
       <div className="w-full bg-gray-800 text-white p-2">
@@ -280,21 +284,13 @@ const DrawingCanvas = () => {
         <BrushSelector selectedBrush={selectedBrush} onBrushSelect={handleBrushSelect} />
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
-            {selectedTool === "brush" && (
-              <button
-                className={`w-8 h-8 flex items-center justify-center rounded ${isErasing ? "bg-blue-500" : "bg-gray-600"}`}
-                onClick={() => setIsErasing(!isErasing)}
-                aria-label="Eraser tool"
-              >
-                <EraserIcon className="w-6 h-6 pointer-events-none" />
-              </button>
-            )}
             <button onMouseDown={() => undo()} className="w-8 h-8 flex items-center justify-center bg-gray-600 rounded hover:bg-gray-500">
               <RefreshCcw className="w-6 h-6 pointer-events-none" />
             </button>
             <button onMouseDown={() => redo()} className="w-8 h-8 flex items-center justify-center bg-gray-600 rounded hover:bg-gray-500">
               <RefreshCw className="w-6 h-6 pointer-events-none" />
             </button>
+
             <button
               className={`w-8 h-8 flex items-center justify-center rounded ${selectedTool === "color-picker" ? "bg-blue-500" : "bg-gray-600"}`}
               onClick={() => setSelectedTool("color-picker")}
@@ -317,43 +313,28 @@ const DrawingCanvas = () => {
               <Fill className="w-6 h-6 pointer-events-none" />
             </button>
           </div>
-          <div className="flex-grow flex items-center space-x-4">
-            <StyledSlider
-              label="Opacity"
-              min={0}
-              max={1}
-              step={0.01}
-              showAsPercent={true}
-              defaultValue={opacity}
-              onChange={(value) => {
-                setOpacity(value);
-                localStorage.setItem("drawingOpacity", value);
-              }}
-            />
 
-            <StyledSlider
-              label="Brush Size"
-              min={0}
-              max={500}
-              linear={false}
-              step={0.01}
-              defaultValue={brushSize}
-              onChange={(value) => {
-                setBrushSize(value);
-                localStorage.setItem("drawingBrushSize", value);
-              }}
+          {selectedTool === "color-picker" && <ColorPickerTool onColorPick={handleColorPick} />}
+          {selectedTool === "brush" && (
+            <BrushTool
+              opacity={opacity}
+              setOpacity={setOpacity}
+              brushSize={brushSize}
+              setBrushSize={setBrushSize}
+              isErasing={isErasing}
+              setIsErasing={setIsErasing}
             />
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <button onClick={handleSave} className="px-3 py-1 bg-blue-500 rounded hover:bg-blue-600">
-              Save
-            </button>
-            <label className="px-3 py-1 bg-gray-600 rounded hover:bg-gray-500 cursor-pointer">
-              Load
-              <input type="file" onChange={handleLoad} accept=".gz" className="hidden" />
-            </label>
-          </div>
+          )}
+          {selectedTool === "fill" && (
+            <FillTool
+              opacity={opacity}
+              setOpacity={setOpacity}
+              contiguous={contiguous}
+              setContiguous={setContiguous}
+              tolerance={tolerance}
+              setTolerance={setTolerance}
+            />
+          )}
         </div>
       </div>
 
