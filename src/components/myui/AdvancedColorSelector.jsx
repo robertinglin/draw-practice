@@ -66,14 +66,54 @@ const AdvancedColorSelector = ({ value = "hsl(0, 100%, 50%)", onChange, quickSwa
 
     // Draw hue indicator
     const hueAngle = (hsl[0] - 180) * (Math.PI / 180);
-    const indicatorRadius = center - wheelThickness / 2;
+    const indicatorOuterX = center + outerRadius * Math.cos(hueAngle);
+    const indicatorOuterY = center + outerRadius * Math.sin(hueAngle);
+    const indicatorInnerX = center + innerRadius * Math.cos(hueAngle);
+    const indicatorInnerY = center + innerRadius * Math.sin(hueAngle);
+
+    // Draw black outline
     ctx.beginPath();
-    ctx.arc(center + indicatorRadius * Math.cos(hueAngle), center + indicatorRadius * Math.sin(hueAngle), 5, 0, 2 * Math.PI);
-    ctx.fillStyle = "white";
-    ctx.fill();
+    ctx.moveTo(indicatorInnerX, indicatorInnerY);
+    ctx.lineTo(indicatorOuterX, indicatorOuterY);
     ctx.strokeStyle = "black";
+    ctx.lineWidth = 3;
     ctx.stroke();
-  }, [hsl]);
+
+    // Draw white center
+    ctx.beginPath();
+    ctx.moveTo(indicatorInnerX, indicatorInnerY);
+    ctx.lineTo(indicatorOuterX, indicatorOuterY);
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }, [hsl, wheelSize, wheelThickness]);
+
+  const getColorAtPosition = (x, y, hue, size) => {
+    x = Math.max(0, Math.min(x, size));
+    y = Math.max(0, Math.min(y, size));
+
+    const s = (x / size) * 100;
+    const v = 100 - (y / size) * 100;
+
+    if (x === 0 && y === 0) return `hsl(${hue}, 0%, 100%)`;
+    if (y === size) return `hsl(${hue}, ${s}%, 0%)`;
+
+    const l = (v * (200 - s)) / 200;
+    const adjustedS = v === 0 ? 0 : (s * v) / (l < 50 ? l * 2 : 200 - l * 2);
+
+    return `hsl(${hue}, ${adjustedS}%, ${l}%)`;
+  };
+
+  const getPositionAtColor = (color, size) => {
+    const [hue, s, l] = hslStringToHSL(color);
+
+    if (l === 0) return { x: (s / 100) * size, y: size, hue };
+
+    const v = l + (s * Math.min(l, 100 - l)) / 100;
+    const s_hsv = v === 0 ? 0 : 2 * (1 - l / v);
+
+    return { x: s_hsv * size, y: ((100 - v) / 100) * size, hue };
+  };
 
   const drawSlSpace = useCallback(() => {
     const canvas = slRef.current;
@@ -82,22 +122,26 @@ const AdvancedColorSelector = ({ value = "hsl(0, 100%, 50%)", onChange, quickSwa
 
     for (let x = 0; x < slSize; x++) {
       for (let y = 0; y < slSize; y++) {
-        const s = (x / slSize) * 100;
-        const l = 100 - (y / slSize) * 100;
-        ctx.fillStyle = `hsl(${hsl[0]}, ${s}%, ${l}%)`;
+        ctx.fillStyle = getColorAtPosition(x, y, hsl[0], slSize);
         ctx.fillRect(x, y, 1, 1);
       }
     }
 
-    // Draw SL indicator
+    const { x, y } = getPositionAtColor(hslToHslString(hslRef.current), slSize);
+
+    // Draw SL selector with black and white outline
     ctx.beginPath();
-    ctx.arc((hsl[1] * slSize) / 100, ((100 - hsl[2]) * slSize) / 100, 5, 0, 2 * Math.PI);
-    ctx.fillStyle = "white";
-    ctx.fill();
+    ctx.arc(x, y, 4, 0, 2 * Math.PI);
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, 2 * Math.PI);
     ctx.strokeStyle = "black";
+    ctx.lineWidth = 1;
     ctx.stroke();
   }, [hsl]);
-
   const handlePointerDown = (e, target) => {
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
@@ -148,11 +192,10 @@ const AdvancedColorSelector = ({ value = "hsl(0, 100%, 50%)", onChange, quickSwa
     const hue = ((angle * 180) / Math.PI + 180) % 360;
     setHsl([hue, hsl[1], hsl[2]]);
   };
-
   const handleSlChange = (x, y) => {
-    const s = Math.max(0, Math.min(100, (x / slSize) * 100));
-    const l = Math.max(0, Math.min(100, 100 - (y / slSize) * 100));
-    setHsl([hsl[0], s, l]);
+    const color = getColorAtPosition(x, y, hslRef.current[0], slSize);
+    const [, newS, newL] = hslStringToHSL(color);
+    setHsl([hslRef.current[0], newS, newL]);
   };
 
   const handlePointerUp = () => {

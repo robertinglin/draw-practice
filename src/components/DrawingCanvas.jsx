@@ -275,8 +275,6 @@ const DrawingCanvas = () => {
     // Implement load functionality
   }, []);
 
-  console.log(brushSize, opacity);
-
   return (
     <>
       <div className="w-full bg-gray-800 text-white p-2">
