@@ -35,7 +35,6 @@ const brushes = {
   airbrush: new Brush({
     type: "softbrush",
     name: "Airbrush",
-    modifier: { scatter: 20 },
   }),
 } as { [key: string]: Brush };
 
@@ -68,10 +67,13 @@ function drawLayer(canvas: HTMLCanvasElement, layer: Layer): string | null {
 function drawNewStrokes(canvas: HTMLCanvasElement, layer: Layer, lastDrawnStrokeId: string | null): string | null {
   const ctx = canvas.getContext("2d");
   if (ctx) {
-    const lastDrawnIndex = layer.strokes.findIndex((stroke) => stroke.id === lastDrawnStrokeId);
+    if (layer.strokes.length === 0) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return null;
+    }
 
-    // If lastDrawnStrokeId is not found or doesn't match the last stroke, redraw everything
-    if (lastDrawnIndex === -1 || lastDrawnIndex !== layer.strokes.length - 1) {
+    const lastDrawnIndex = layer.strokes.findIndex((stroke) => stroke.id === lastDrawnStrokeId);
+    if (lastDrawnIndex === -1) {
       return drawLayer(canvas, layer);
     }
 
@@ -100,6 +102,10 @@ export default function draw(
         lastDrawnStrokeId: null,
       };
     }
+    if (canvasCache["@" + layer.id]) {
+      canvasCache[layer.id] = canvasCache["@" + layer.id];
+      delete canvasCache["@" + layer.id];
+    }
 
     if (layer.visible) {
       const { canvas, lastDrawnStrokeId } = canvasCache[layer.id];
@@ -107,7 +113,16 @@ export default function draw(
       canvasCache[layer.id].lastDrawnStrokeId = newLastDrawnStrokeId;
 
       if (activeStroke && activeStroke.layerId === layer.id) {
-        const ctx = canvas.getContext("2d");
+        canvasCache["@" + layer.id] = canvasCache[layer.id];
+        canvasCache[layer.id] = {
+          canvas: createCanvas(width, height),
+          lastDrawnStrokeId: null,
+        };
+
+        const overlayCanvas = canvasCache[layer.id].canvas;
+
+        const ctx = overlayCanvas.getContext("2d");
+        ctx.drawImage(canvas, 0, 0);
         if (ctx) {
           drawStroke(ctx, activeStroke);
         }

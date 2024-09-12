@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import StyledSlider from "./myui/StyledSlider";
 import AdvancedColorSelector from "./myui/AdvancedColorSelector";
-import { parseColorHistory, EraserIcon, RefreshCcw } from "../lib/drawing-utils";
+import { parseColorHistory, EraserIcon, RefreshCcw, RefreshCw } from "../lib/drawing-utils";
 import { Pipette as EyeDropper } from "lucide-react";
 import Layers from "./myui/Layers";
 import { useLayers } from "../hooks/useLayers";
@@ -12,7 +12,7 @@ const CANVAS_HEIGHT = 1000;
 
 const DrawingCanvas = () => {
   const fileId = "drawing";
-  const { layers, activeLayer, addStrokeToLayer, undo } = useLayers(fileId);
+  const { layers, activeLayer, addStrokeToLayer, undo, redo } = useLayers(fileId);
 
   const canvasWrapperRef = useRef(null);
   const canvasCacheRef = useRef({});
@@ -45,7 +45,7 @@ const DrawingCanvas = () => {
     return () => document.removeEventListener("keydown", handleUndo);
   }, [undo]);
 
-  useEffect(() => {
+  const redraw = useCallback(() => {
     const activeStroke = currentStroke
       ? {
           type: isErasing ? "erase" : "draw",
@@ -72,6 +72,10 @@ const DrawingCanvas = () => {
       }
     });
   }, [layers, fileId, currentStroke]);
+
+  useEffect(() => {
+    redraw();
+  }, [redraw]);
 
   const getCanvasPoint = useCallback(
     (e) => {
@@ -267,6 +271,9 @@ const DrawingCanvas = () => {
             </button>
             <button onMouseDown={() => undo()} className="w-8 h-8 flex items-center justify-center bg-gray-600 rounded hover:bg-gray-500">
               <RefreshCcw className="w-6 h-6 pointer-events-none" />
+            </button>
+            <button onMouseDown={() => redo()} className="w-8 h-8 flex items-center justify-center bg-gray-600 rounded hover:bg-gray-500">
+              <RefreshCw className="w-6 h-6 pointer-events-none" />
             </button>
             <button
               className={`w-8 h-8 flex items-center justify-center rounded ${isColorPicking ? "bg-blue-500" : "bg-gray-600"}`}

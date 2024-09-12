@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 export interface Layer {
   id: number;
@@ -42,24 +42,13 @@ interface BranchingHistory {
   current: HistoryNode;
 }
 
-const layersStore: { [fileId: string]: BranchingHistory } = {};
-const listeners: { [fileId: string]: Set<() => void> } = {};
-let strokeCounter = 0; // Atomic counter for stroke IDs
+// Global state store
+const globalStore: { [fileId: string]: BranchingHistory } = {};
 
-const notifyListeners = (fileId: string) => {
-  listeners[fileId]?.forEach((listener) => listener());
-};
-
-const getUniqueStrokeId = () => {
-  strokeCounter += 1;
-  return `stroke_${Date.now()}_${strokeCounter}`;
-};
-
-export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
-  const [, forceUpdate] = useState({});
-
-  const history = useMemo(() => {
-    if (!layersStore[fileId]) {
+// Custom hook for managing global state
+const useGlobalStore = (fileId: string, initialLayers: Layer[] = []) => {
+  const [store, setStore] = useState<BranchingHistory>(() => {
+    if (!globalStore[fileId]) {
       const initialState: LayersState = {
         layers: initialLayers.length > 0 ? initialLayers : [{ id: 1, strokes: [], visible: true, blendMode: "normal" }],
         activeLayer: 1,
@@ -73,23 +62,38 @@ export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
         editCount: 1,
         isCurrent: true,
       };
-      layersStore[fileId] = { root, current: root };
+      globalStore[fileId] = { root, current: root };
     }
-    return layersStore[fileId];
-  }, [fileId, initialLayers]);
+    return globalStore[fileId];
+  });
 
   useEffect(() => {
-    if (!listeners[fileId]) {
-      listeners[fileId] = new Set();
-    }
-    listeners[fileId].add(forceUpdate as () => void);
     return () => {
-      listeners[fileId].delete(forceUpdate as () => void);
-      if (listeners[fileId].size === 0) {
-        delete listeners[fileId];
-      }
+      // Clean up the store when the component unmounts
+      delete globalStore[fileId];
     };
   }, [fileId]);
+
+  const updateStore = useCallback(
+    (newStore: BranchingHistory) => {
+      setStore(newStore);
+      globalStore[fileId] = newStore;
+    },
+    [fileId]
+  );
+
+  return [store, updateStore] as const;
+};
+
+let strokeCounter = 0; // Atomic counter for stroke IDs
+
+const getUniqueStrokeId = () => {
+  strokeCounter += 1;
+  return `stroke_${Date.now()}_${strokeCounter}`;
+};
+
+export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
+  const [history, updateHistory] = useGlobalStore(fileId, initialLayers);
 
   const applyAction = useCallback(
     (action: Action) => {
@@ -130,32 +134,40 @@ export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
       };
       history.current.isCurrent = false;
       history.current.children.push(newNode);
-      history.current = newNode;
 
-      notifyListeners(fileId);
+      updateHistory({
+        ...history,
+        current: newNode,
+      });
     },
-    [history, fileId]
+    [history, updateHistory]
   );
 
   const undo = useCallback(() => {
     if (history.current.parent) {
       history.current.isCurrent = false;
-      history.current = history.current.parent;
-      history.current.isCurrent = true;
-      notifyListeners(fileId);
+      const parent = history.current.parent;
+      parent.isCurrent = true;
+      updateHistory({
+        ...history,
+        current: parent,
+      });
     }
-  }, [history, fileId]);
+  }, [history, updateHistory]);
 
   const redo = useCallback(
     (index: number = 0) => {
       if (history.current.children.length > index) {
         history.current.isCurrent = false;
-        history.current = history.current.children[index];
-        history.current.isCurrent = true;
-        notifyListeners(fileId);
+        const child = history.current.children[index];
+        child.isCurrent = true;
+        updateHistory({
+          ...history,
+          current: child,
+        });
       }
     },
-    [history, fileId]
+    [history, updateHistory]
   );
 
   const getBranchingStructure = useCallback(() => {
@@ -178,8 +190,10 @@ export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
         if (node.id === branchId) {
           history.current.isCurrent = false;
           node.isCurrent = true;
-          history.current = node;
-          notifyListeners(fileId);
+          updateHistory({
+            ...history,
+            current: node,
+          });
           return true;
         }
         for (const child of node.children) {
@@ -192,23 +206,7 @@ export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
 
       findAndSwitchToBranch(history.root);
     },
-    [history, fileId]
-  );
-
-  const subscribeToChanges = useCallback(
-    (callback: () => void) => {
-      if (!listeners[fileId]) {
-        listeners[fileId] = new Set();
-      }
-      listeners[fileId].add(callback);
-      return () => {
-        listeners[fileId].delete(callback);
-        if (listeners[fileId].size === 0) {
-          delete listeners[fileId];
-        }
-      };
-    },
-    [fileId]
+    [history, updateHistory]
   );
 
   const setActiveLayer = useCallback(
@@ -259,7 +257,7 @@ export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
     (layerId: number, stroke: Omit<Stroke, "id">) => {
       const newStroke: Stroke = {
         ...stroke,
-        id: getUniqueStrokeId(), // Use the new function to generate a unique id
+        id: getUniqueStrokeId(),
       };
       applyAction({ type: "ADD_STROKE", layerId, data: newStroke });
     },
@@ -279,6 +277,5 @@ export const useLayers = (fileId: string, initialLayers: Layer[] = []) => {
     redo,
     getBranchingStructure,
     switchToBranch,
-    subscribeToChanges,
   };
 };

@@ -401,7 +401,7 @@ class Brush {
       const key = Math.round(pressure * 20) / 20; // Round to nearest 0.05
       if (!gradientCache.has(key)) {
         const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
-        const innerOpacity = options.opacity * pressure * 0.5;
+        const innerOpacity = options.opacity * pressure * 0.85;
         gradient.addColorStop(0, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, ${innerOpacity})`);
         gradient.addColorStop(0.6, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, ${innerOpacity * 0.5})`);
         gradient.addColorStop(1, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0)`);
