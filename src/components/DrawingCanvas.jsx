@@ -252,7 +252,6 @@ const DrawingCanvas = () => {
   }, []);
 
   const handleColorChange = useCallback((newColor) => {
-    console.log(newColor);
     setColor(newColor);
     localStorage.setItem("drawingColor", newColor);
   }, []);

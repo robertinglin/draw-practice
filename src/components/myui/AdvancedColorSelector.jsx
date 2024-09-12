@@ -176,7 +176,6 @@ const AdvancedColorSelector = ({ value = "hsl(0, 100%, 50%)", onChange, quickSwa
 
   const currentHsl = hslToHslString(hsl);
 
-  console.log(colorPosition.x, colorPosition.y, colorPosition.w, colorPosition.h);
   return (
     <DraggableContainer
       initialX={colorPosition.x}
