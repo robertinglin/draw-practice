@@ -111,7 +111,6 @@ function bilinearInterpolation(
   ];
 }
 
-type BrushType = "standard" | "stamp" | "airbrush" | "texture" | "softbrush";
 type BlendMode =
   | "normal"
   | "multiply"
@@ -149,6 +148,8 @@ interface StrokeOptions {
   eraser: boolean;
 }
 
+type BrushType = "standard" | "stamp" | "airbrush" | "texture" | "softbrush" | "computed";
+
 class Brush {
   id: string;
   name: string;
@@ -157,7 +158,13 @@ class Brush {
   modifier: BrushModifier;
   texture?: HTMLImageElement;
   stamp?: HTMLImageElement;
-  fillCount = 0;
+  fillCount: number;
+  diameter?: number;
+  roundness?: number;
+  angle?: number;
+  hardness?: number;
+  antiAliasing?: boolean;
+  valid?: boolean;
 
   constructor(params: Partial<Brush>) {
     this.id = params.id || crypto.randomUUID();
@@ -167,6 +174,74 @@ class Brush {
     this.modifier = params.modifier || {};
     this.texture = params.texture;
     this.stamp = params.stamp;
+    this.fillCount = params.fillCount || 0;
+    this.diameter = params.diameter;
+    this.roundness = params.roundness;
+    this.angle = params.angle;
+    this.hardness = params.hardness;
+    this.antiAliasing = params.antiAliasing;
+    this.valid = params.valid;
+  }
+
+  // Serialization method
+  toJSON(): string {
+    const data: any = {
+      id: this.id,
+      name: this.name,
+      type: this.type,
+      blendMode: this.blendMode,
+      modifier: this.modifier,
+      fillCount: this.fillCount,
+      diameter: this.diameter,
+      roundness: this.roundness,
+      angle: this.angle,
+      hardness: this.hardness,
+      antiAliasing: this.antiAliasing,
+      valid: this.valid,
+    };
+
+    // Convert texture and stamp to base64 if they exist
+    if (this.texture) {
+      data.texture = this.imageToBase64(this.texture);
+    }
+    if (this.stamp) {
+      data.stamp = this.imageToBase64(this.stamp);
+    }
+
+    return data;
+  }
+
+  // Deserialization method
+  static fromJSON(json: string | object): Brush {
+    const data = typeof json === "string" ? JSON.parse(json) : json;
+    const brush = new Brush(data);
+
+    // Convert base64 back to HTMLImageElement if they exist
+    if (data.texture) {
+      brush.texture = brush.base64ToImage(data.texture);
+    }
+    if (data.stamp) {
+      brush.stamp = brush.base64ToImage(data.stamp);
+    }
+
+    return brush;
+  }
+
+  // Helper method to convert HTMLImageElement to base64
+  private imageToBase64(img: HTMLImageElement): string {
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext("2d");
+    ctx?.drawImage(img, 0, 0);
+    return canvas.toDataURL();
+  }
+
+  // Helper method to convert base64 to HTMLImageElement
+  private base64ToImage(base64: string): HTMLImageElement {
+    const img = new Image();
+    img.src = base64;
+    return img;
   }
 
   applyStroke(ctx: CanvasRenderingContext2D, points: Point[], options: StrokeOptions): void {
@@ -178,7 +253,6 @@ class Brush {
       ctx.globalCompositeOperation = this.blendMode === "normal" ? "source-over" : this.blendMode;
     }
 
-    // Use the first point's coordinates as seed for our PRNG
     const [seedX, seedY] = points[0];
     const seed = seedX * 1000000 + seedY;
     const random = new DeterministicRandom(seed);
@@ -198,13 +272,13 @@ class Brush {
       case "texture":
         this.applyTextureStroke(ctx, points, options, random);
         break;
-
       case "softbrush":
         this.applySoftBrushStroke(ctx, points, options);
         break;
+      case "computed":
+        this.applyComputedBrushStroke(ctx, points, options);
+        break;
     }
-
-    // console.log(this.fillCount);
 
     ctx.globalCompositeOperation = "source-over";
   }
@@ -236,9 +310,35 @@ class Brush {
 
   private applyStampStroke(ctx: CanvasRenderingContext2D, points: Point[], options: StrokeOptions, random: DeterministicRandom): void {
     if (!this.stamp) return;
-
+    // Add additional points for smoother strokes
+    // points = this.addAdditionalPoints(points, options);
     const { spacing = options.size, rotation = 0 } = this.modifier;
     let distance = 0;
+    // Create a temporary canvas for stamp manipulation
+    const tempCanvas = document.createElement("canvas");
+    const tempCtx = tempCanvas.getContext("2d");
+    if (!tempCtx) return;
+    // Set the temporary canvas size to match the stamp
+    tempCanvas.width = this.stamp.width;
+    tempCanvas.height = this.stamp.height;
+    // Draw the original stamp onto the temporary canvas
+    tempCtx.drawImage(this.stamp, 0, 0);
+    // Get the stamp's pixel data
+    const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+    const data = imageData.data;
+    // Parse the color option
+    const [r, g, b] = anyToRgb(options.color);
+    // Adjust the color and opacity of the stamp
+    for (let i = 0; i < data.length; i += 4) {
+      const gray = (data[i] + data[i + 1] + data[i + 2]) / 3; // Average of RGB for grayscale
+      const normalizedGray = 1 - gray / 255; // Normalize to 0-1 range
+      data[i] = r; // Red
+      data[i + 1] = g; // Green
+      data[i + 2] = b; // Blue
+      data[i + 3] = Math.round(normalizedGray * 255); // Alpha
+    }
+    // Put the adjusted image data back onto the temporary canvas
+    tempCtx.putImageData(imageData, 0, 0);
 
     for (let i = 1; i < points.length; i++) {
       const [x0, y0, p0] = points[i - 1];
@@ -246,22 +346,20 @@ class Brush {
       const dx = x1 - x0;
       const dy = y1 - y0;
       const segmentLength = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx); // Calculate the angle between points
 
       while (distance < segmentLength) {
         const t = distance / segmentLength;
         const x = x0 + dx * t;
         const y = y0 + dy * t;
         const pressure = p0 + (p1 - p0) * t;
-
-        const size = options.size * pressure;
-        ctx.globalAlpha = options.opacity * pressure;
-
         ctx.save();
+        const size = options.size * pressure;
+        ctx.globalAlpha = options.opacity * options.opacity;
         ctx.translate(x, y);
-        ctx.rotate(rotation + random.random() * Math.PI * 2);
-        ctx.drawImage(this.stamp, -size / 2, -size / 2, size, size);
+        ctx.rotate(angle + rotation * random.random() * Math.PI * 2); // Apply the calculated angle, rotation, and random rotation
+        ctx.drawImage(tempCanvas, -size / 2, -size / 2, size, size);
         ctx.restore();
-
         distance += spacing;
       }
       distance -= segmentLength;
@@ -356,7 +454,7 @@ class Brush {
 
         ctx.save();
         ctx.translate(x, y);
-        ctx.rotate(rotation + random.random() * Math.PI * 2);
+        ctx.rotate(rotation * random.random() * Math.PI * 2);
         ctx.drawImage(this.texture, -size / 2, -size / 2, size, size);
         ctx.restore();
 
@@ -431,6 +529,51 @@ class Brush {
       }
     }
     ctx.restore();
+  }
+
+  private applyComputedBrushStroke(ctx: CanvasRenderingContext2D, points: Point[], options: StrokeOptions): void {
+    if (this.diameter === undefined) return;
+
+    const { diameter, roundness = 1, angle = 0, hardness = 1 } = this;
+
+    const rotation = angle * (Math.PI / 180);
+
+    // Prepare a canvas to create the brush tip
+    const brushTipSize = diameter;
+    const brushTipCanvas = document.createElement("canvas");
+    brushTipCanvas.width = brushTipSize;
+    brushTipCanvas.height = brushTipSize;
+    const brushTipCtx = brushTipCanvas.getContext("2d")!;
+
+    // Create the brush tip shape
+    brushTipCtx.save();
+    brushTipCtx.translate(brushTipSize / 2, brushTipSize / 2);
+    brushTipCtx.rotate(rotation);
+    brushTipCtx.scale(roundness, 1);
+    brushTipCtx.beginPath();
+    brushTipCtx.arc(0, 0, brushTipSize / 2, 0, Math.PI * 2);
+    brushTipCtx.restore();
+
+    // Create hardness gradient
+    const grd = brushTipCtx.createRadialGradient(brushTipSize / 2, brushTipSize / 2, 0, brushTipSize / 2, brushTipSize / 2, brushTipSize / 2);
+    grd.addColorStop(0, `rgba(0, 0, 0, 1)`);
+    grd.addColorStop(hardness, `rgba(0, 0, 0, 1)`);
+    grd.addColorStop(1, `rgba(0, 0, 0, 0)`);
+
+    brushTipCtx.fillStyle = grd;
+    brushTipCtx.fill();
+
+    // Apply the brush tip along the stroke points
+    for (const [x, y, pressure] of points) {
+      const size = diameter * pressure;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation);
+      ctx.globalAlpha = options.opacity * pressure;
+      ctx.drawImage(brushTipCanvas, -size / 2, -size / 2, size, size);
+      ctx.restore();
+    }
   }
 }
 

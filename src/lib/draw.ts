@@ -1,5 +1,6 @@
 import Brush from "../lib/brushes/Brush";
 import { anyToRgb } from "./drawing-utils";
+import { openDB, DBSchema } from "idb";
 
 type Point = [number, number, number];
 
@@ -40,13 +41,46 @@ interface CanvasCache {
   };
 }
 
-const brushes = {
-  standard: new Brush({ type: "standard", name: "Standard Brush" }),
-  airbrush: new Brush({
-    type: "softbrush",
-    name: "Airbrush",
-  }),
-} as { [key: string]: Brush };
+interface BrushDB extends DBSchema {
+  brushes: {
+    key: string;
+    value: Brush;
+  };
+}
+
+const dbPromise = openDB<BrushDB>("BrushDB", 1, {
+  upgrade(db) {
+    db.createObjectStore("brushes", { keyPath: "id" });
+  },
+});
+
+let brushes: { [key: string]: Brush } = {};
+
+async function loadBrushes() {
+  const db = await dbPromise;
+  const storedBrushes = await db.getAll("brushes");
+
+  brushes = storedBrushes.reduce((acc, brush) => {
+    acc[brush.id] = Brush.fromJSON(brush);
+    return acc;
+  }, {} as { [key: string]: Brush });
+
+  // Add default brushes if they're missing
+  const defaultBrushes = [
+    new Brush({ id: "standard", type: "standard", name: "Standard Brush" }),
+    new Brush({ id: "softbrush", type: "softbrush", name: "Airbrush" }),
+  ];
+
+  for (const brush of defaultBrushes) {
+    if (!brushes[brush.id]) {
+      await db.put("brushes", brush);
+      brushes[brush.id] = brush;
+    }
+  }
+}
+
+// Call this function before using brushes
+loadBrushes();
 
 function createCanvas(width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
@@ -59,14 +93,20 @@ function drawStroke(ctx: CanvasRenderingContext2D, stroke: AnyStroke): void {
   if (stroke.type === "fill") {
     fillArea(ctx, stroke as FillStroke);
   } else {
-    brushes[stroke.brushType].applyStroke(ctx, stroke.points, {
-      size: stroke.brushSize,
-      opacity: stroke.opacity,
-      color: stroke.type === "erase" ? "black" : stroke.color,
-      eraser: stroke.type === "erase",
-    });
+    const brush = brushes[stroke.brushType];
+    if (brush) {
+      brush.applyStroke(ctx, stroke.points, {
+        size: stroke.brushSize,
+        opacity: stroke.opacity,
+        color: stroke.type === "erase" ? "black" : stroke.color,
+        eraser: stroke.type === "erase",
+      });
+    } else {
+      console.error(`Brush type ${stroke.brushType} not found`);
+    }
   }
 }
+
 function fillArea(ctx: CanvasRenderingContext2D, fillStroke: FillStroke): void {
   const [startPoint] = fillStroke.points;
   const startX = Math.round(startPoint[0]);

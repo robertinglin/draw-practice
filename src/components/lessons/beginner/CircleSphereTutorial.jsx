@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Circle } from 'lucide-react';
+import React, { useState } from "react";
+import { Circle } from "lucide-react";
 
 const Section = ({ title, children }) => (
   <div className="mb-8">
@@ -16,41 +16,41 @@ const Subsection = ({ title, children }) => (
 );
 
 const CircleSphereTutorial = () => {
-  const [activeSection, setActiveSection] = useState('2d');
+  const [activeSection, setActiveSection] = useState("2d");
+
+  if (1 == 1) {
+    return null;
+  }
 
   return (
     <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-md overflow-hidden">
       <div className="p-6 bg-gray-100">
         <h1 className="text-3xl font-bold mb-4 text-center">Mastering Circles and Spheres</h1>
-        <p className="text-center">
-          Learn to draw perfect circles, create convincing spheres, and manipulate these forms for dynamic artworks.
-        </p>
+        <p className="text-center">Learn to draw perfect circles, create convincing spheres, and manipulate these forms for dynamic artworks.</p>
       </div>
 
       <div className="flex border-b border-gray-200">
-        {['2d', '3d', 'deforming'].map((section) => (
+        {["2d", "3d", "deforming"].map((section) => (
           <button
             key={section}
             className={`flex-1 py-2 px-4 font-semibold ${
-              activeSection === section
-                ? 'bg-white border-b-2 border-blue-500 text-blue-500'
-                : 'bg-gray-100 text-gray-600'
+              activeSection === section ? "bg-white border-b-2 border-blue-500 text-blue-500" : "bg-gray-100 text-gray-600"
             }`}
             onClick={() => setActiveSection(section)}
           >
-            {section === '2d' ? '2D Circles' : section === '3d' ? '3D Spheres' : 'Deforming Shapes'}
+            {section === "2d" ? "2D Circles" : section === "3d" ? "3D Spheres" : "Deforming Shapes"}
           </button>
         ))}
       </div>
 
       <div className="p-6">
-        {activeSection === '2d' && (
+        {activeSection === "2d" && (
           <>
             <Section title="Drawing Perfect Circles">
               <Subsection title="Understanding the Circle">
                 <p>
-                  A circle is a perfectly round shape where all points are equidistant from the center. 
-                  Mastering the circle is crucial for many aspects of drawing, from creating organic forms to precise technical illustrations.
+                  A circle is a perfectly round shape where all points are equidistant from the center. Mastering the circle is crucial for many aspects of
+                  drawing, from creating organic forms to precise technical illustrations.
                 </p>
               </Subsection>
 
@@ -100,13 +100,13 @@ const CircleSphereTutorial = () => {
           </>
         )}
 
-        {activeSection === '3d' && (
+        {activeSection === "3d" && (
           <>
             <Section title="Creating Convincing Spheres">
               <Subsection title="From Circle to Sphere">
                 <p>
-                  A sphere is the three-dimensional equivalent of a circle. Creating the illusion of a sphere on a 
-                  flat surface requires understanding of form, light, and shadow.
+                  A sphere is the three-dimensional equivalent of a circle. Creating the illusion of a sphere on a flat surface requires understanding of form,
+                  light, and shadow.
                 </p>
               </Subsection>
 
@@ -162,13 +162,13 @@ const CircleSphereTutorial = () => {
           </>
         )}
 
-        {activeSection === 'deforming' && (
+        {activeSection === "deforming" && (
           <>
             <Section title="Deforming Circles and Spheres">
               <Subsection title="Understanding Deformation">
                 <p>
-                  Deforming circles and spheres allows you to create more complex and dynamic shapes. 
-                  This skill is crucial for drawing organic forms, creating movement, and adding interest to your artwork.
+                  Deforming circles and spheres allows you to create more complex and dynamic shapes. This skill is crucial for drawing organic forms, creating
+                  movement, and adding interest to your artwork.
                 </p>
               </Subsection>
 
@@ -238,8 +238,7 @@ const CircleSphereTutorial = () => {
 
       <div className="p-6 bg-gray-100 text-center">
         <p className="text-gray-600">
-          Remember, mastering circles and spheres takes time and practice. 
-          Don't get discouraged – keep drawing and experimenting with these forms every day!
+          Remember, mastering circles and spheres takes time and practice. Don't get discouraged – keep drawing and experimenting with these forms every day!
         </p>
       </div>
     </div>

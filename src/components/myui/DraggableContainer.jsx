@@ -127,7 +127,7 @@ const DraggableContainer = ({ children, initialX = 20, initialY = 20, initialWid
   return (
     <div
       ref={containerRef}
-      className="fixed z-50 shadow-lg"
+      className="fixed z-10 shadow-lg"
       style={{
         left: position.x,
         top: position.y,

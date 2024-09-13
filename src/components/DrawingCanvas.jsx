@@ -22,6 +22,7 @@ const DrawingCanvas = () => {
   const brushCursorRef = useRef(null);
   const currentPointerTypeRef = useRef(null);
   const cursorPositionRef = useRef({ x: 0, y: 0 });
+
   const [isDrawing, setIsDrawing] = useState(false);
   const [isErasing, setIsErasing] = useState(false);
   const [currentStroke, setCurrentStroke] = useState([]);
@@ -39,6 +40,11 @@ const DrawingCanvas = () => {
     setSelectedBrush(brushType);
   };
 
+  const handleColorChange = useCallback((newColor) => {
+    setColor(newColor);
+    localStorage.setItem("drawingColor", newColor);
+  }, []);
+
   useEffect(() => {
     const handleUndo = (e) => {
       if (e.ctrlKey && e.key === "z") {
@@ -53,18 +59,28 @@ const DrawingCanvas = () => {
     return () => document.removeEventListener("keydown", handleUndo);
   }, [undo]);
 
+  useEffect(() => {
+    localStorage.setItem("drawingOpacity", opacity.toString());
+  }, [opacity]);
+
+  useEffect(() => {
+    localStorage.setItem("drawingBrushSize", brushSize.toString());
+  }, [brushSize]);
+
   const redraw = useCallback(() => {
-    const activeStroke = currentStroke
-      ? {
-          type: isErasing ? "erase" : "draw",
-          points: currentStroke,
-          opacity: opacity,
-          brushSize: brushSize,
-          color: isErasing ? "black" : color,
-          brushType: selectedBrush,
-          layerId: activeLayer,
-        }
-      : undefined;
+    const activeStroke =
+      currentStroke.length > 0
+        ? {
+            type: isErasing ? "erase" : "draw",
+            points: currentStroke,
+            opacity: opacity,
+            brushSize: brushSize,
+            color: isErasing ? "black" : color,
+            brushType: selectedBrush,
+            layerId: activeLayer,
+          }
+        : undefined;
+
     canvasCacheRef.current = draw(CANVAS_WIDTH, CANVAS_HEIGHT, { layers }, canvasCacheRef.current, activeStroke);
 
     // Update the DOM with the new canvas states
@@ -79,19 +95,16 @@ const DrawingCanvas = () => {
         }
       }
     });
-  }, [layers, fileId, currentStroke]);
+  }, [layers, currentStroke, isErasing, opacity, brushSize, color, selectedBrush, activeLayer]);
 
   useEffect(() => {
     redraw();
   }, [redraw]);
 
-  const getCanvasPoint = useCallback(
-    (e) => {
-      const rect = canvasWrapperRef.current.getBoundingClientRect();
-      return [e.clientX - rect.left, e.clientY - rect.top];
-    },
-    [activeLayer]
-  );
+  const getCanvasPoint = useCallback((e) => {
+    const rect = canvasWrapperRef.current.getBoundingClientRect();
+    return [e.clientX - rect.left, e.clientY - rect.top];
+  }, []);
 
   const handleColorPick = useCallback(
     (e) => {
@@ -117,11 +130,11 @@ const DrawingCanvas = () => {
       const imageData = tempCtx.getImageData(x, y, 1, 1);
       const [r, g, b] = imageData.data;
 
-      // convert hsl to hsl string
+      // Convert RGB to HSL string
       const hsl = rgbToHsl(r, g, b);
       handleColorChange(hsl);
     },
-    [selectedTool, getCanvasPoint, layers]
+    [selectedTool, getCanvasPoint, layers, handleColorChange]
   );
 
   const handleFill = useCallback(
@@ -137,6 +150,7 @@ const DrawingCanvas = () => {
     },
     [getCanvasPoint, activeLayer, addFillToLayer, color, opacity, tolerance, contiguous]
   );
+
   const calculateCursorSize = useCallback(
     (pressure) => {
       return Math.max(4, brushSize * Math.max(pressure, 0.5));
@@ -174,7 +188,6 @@ const DrawingCanvas = () => {
         circle.setAttribute("cx", size / 2);
         circle.setAttribute("cy", size / 2);
         circle.setAttribute("r", size / 2 - 1);
-        circle.setAttribute("stroke-opacity", "1");
         circle.setAttribute("stroke", isErasing && selectedTool === "brush" ? "red" : "black");
       }
     },
@@ -250,29 +263,11 @@ const DrawingCanvas = () => {
       setCurrentStroke([]);
       currentPointerTypeRef.current = null;
     },
-    [selectedTool, isDrawing, currentStroke, isErasing, opacity, brushSize, color, activeLayer, addStrokeToLayer, selectedBrush]
+    [selectedTool, isDrawing, currentStroke, isErasing, opacity, brushSize, color, activeLayer, addStrokeToLayer, selectedBrush, setColorHistory]
   );
 
   const handlePointerLeave = useCallback(() => {
     setCursorHidden(true);
-  }, []);
-
-  const handleColorChange = useCallback((newColor) => {
-    setColor(newColor);
-    localStorage.setItem("drawingColor", newColor);
-  }, []);
-
-  const handleColorMove = useCallback((x, y) => {
-    setColorPosition({ x, y });
-    localStorage.setItem("colorPosition", JSON.stringify({ x, y }));
-  }, []);
-
-  const handleSave = useCallback(() => {
-    // Implement save functionality
-  }, []);
-
-  const handleLoad = useCallback((e) => {
-    // Implement load functionality
   }, []);
 
   return (
