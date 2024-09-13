@@ -307,38 +307,45 @@ class Brush {
     });
     drawStroke(ctx, stroke, options.color, options.opacity);
   }
-
   private applyStampStroke(ctx: CanvasRenderingContext2D, points: Point[], options: StrokeOptions, random: DeterministicRandom): void {
     if (!this.stamp) return;
-    // Add additional points for smoother strokes
-    // points = this.addAdditionalPoints(points, options);
-    const { spacing = options.size, rotation = 0 } = this.modifier;
+    let { spacing = options.size, rotation = -1 } = this.modifier;
     let distance = 0;
-    // Create a temporary canvas for stamp manipulation
+
+    // Create and set up temporary canvas (unchanged)
     const tempCanvas = document.createElement("canvas");
     const tempCtx = tempCanvas.getContext("2d");
     if (!tempCtx) return;
-    // Set the temporary canvas size to match the stamp
     tempCanvas.width = this.stamp.width;
     tempCanvas.height = this.stamp.height;
-    // Draw the original stamp onto the temporary canvas
     tempCtx.drawImage(this.stamp, 0, 0);
-    // Get the stamp's pixel data
+
+    // Adjust stamp color and opacity (unchanged)
     const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
     const data = imageData.data;
-    // Parse the color option
     const [r, g, b] = anyToRgb(options.color);
-    // Adjust the color and opacity of the stamp
     for (let i = 0; i < data.length; i += 4) {
-      const gray = (data[i] + data[i + 1] + data[i + 2]) / 3; // Average of RGB for grayscale
-      const normalizedGray = 1 - gray / 255; // Normalize to 0-1 range
-      data[i] = r; // Red
-      data[i + 1] = g; // Green
-      data[i + 2] = b; // Blue
-      data[i + 3] = Math.round(normalizedGray * 255); // Alpha
+      const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      const normalizedGray = 1 - gray / 255;
+      data[i] = r;
+      data[i + 1] = g;
+      data[i + 2] = b;
+      data[i + 3] = Math.round(normalizedGray * 255);
     }
-    // Put the adjusted image data back onto the temporary canvas
     tempCtx.putImageData(imageData, 0, 0);
+
+    // Function to calculate angle considering neighboring points
+    const calculateSmoothedAngle = (index: number, lookAhead: number = 2) => {
+      const start = Math.max(0, index - lookAhead);
+      const end = Math.min(points.length - 1, index + lookAhead);
+      let sumX = 0,
+        sumY = 0;
+      for (let i = start; i < end; i++) {
+        sumX += points[i + 1][0] - points[i][0];
+        sumY += points[i + 1][1] - points[i][1];
+      }
+      return Math.atan2(sumY, sumX);
+    };
 
     for (let i = 1; i < points.length; i++) {
       const [x0, y0, p0] = points[i - 1];
@@ -346,7 +353,7 @@ class Brush {
       const dx = x1 - x0;
       const dy = y1 - y0;
       const segmentLength = Math.sqrt(dx * dx + dy * dy);
-      const angle = Math.atan2(dy, dx); // Calculate the angle between points
+      const smoothedAngle = calculateSmoothedAngle(i - 1);
 
       while (distance < segmentLength) {
         const t = distance / segmentLength;
@@ -357,7 +364,10 @@ class Brush {
         const size = options.size * pressure;
         ctx.globalAlpha = options.opacity * options.opacity;
         ctx.translate(x, y);
-        ctx.rotate(angle + rotation * random.random() * Math.PI * 2); // Apply the calculated angle, rotation, and random rotation
+        if (rotation === -1) {
+          rotation = smoothedAngle;
+        }
+        ctx.rotate(rotation); // * random.random() * Math.PI * 2);
         ctx.drawImage(tempCanvas, -size / 2, -size / 2, size, size);
         ctx.restore();
         distance += spacing;
